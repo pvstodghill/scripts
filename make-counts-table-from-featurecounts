@@ -1,0 +1,179 @@
+#! /usr/bin/env perl
+
+use strict;
+use warnings;
+use Getopt::Std;
+
+use constant { TRUE => 1, FALSE => 0 };
+
+# ------------------------------------------------------------------------
+
+my $feature_arg = "gene"; # fixme: should be parameter
+my $id_arg = "gene_id"; # fixme: should be parameter
+
+# ------------------------------------------------------------------------
+
+my $options_specs = "";
+my $options_descr = "";
+
+sub notice_option {
+  my ($spec,$descr) = @_;
+  $options_specs .= $spec;
+  $options_descr .= $descr . "\n";
+}
+
+our $opt_h = 0; notice_option("h", "-h - print this message");
+our $opt_u = 0; notice_option("u", "-u - add unmatched read count to end of table");
+
+$options_descr .= "\n";
+
+if (!getopts($options_specs)) {
+  usage(1);
+}
+
+sub usage {
+  print STDERR "Usage: $0 [options] REGIONS.gtf tag1:file1.txt[.gz] tag2:file2.txt[.gz] ...\n";
+  print $options_descr;
+  exit(@_);
+}
+
+if ($opt_h) {
+  usage();
+}
+
+if (scalar(@ARGV) < 2) {
+  usage(1);
+}
+
+my ($regions_fn, @tag_files) = @ARGV;
+
+# ------------------------------------------------------------------------
+# Read the regions. Store by replicon.
+# ------------------------------------------------------------------------
+
+my @all_idattrs;
+my %idattr_row;
+
+use constant { NO_VALUE => ";no-value;" };
+
+sub parse_gtf_attributes {
+  my ($raw_attributes) = @_;
+  my $attributes = {};
+  foreach my $key_val (split(/; */,$raw_attributes)) {
+    my ($key,$val);
+    if ( $key_val =~ /^([^ ]+) (.*)/ ) {
+      ($key,$val) = ($1,$2);
+      $val =~ s/^"//;
+      $val =~ s/"$//;
+    } else {
+      ($key,$val) = ($key_val, NO_VALUE);
+    }
+    $attributes->{$key} = $val;
+  }
+  return $attributes;
+}
+
+open(my $regions_fh,"<",$regions_fn) || die "Cannot open: <<$regions_fn>>,";
+while (<$regions_fh>) {
+  chomp;
+  if ( /^#/ || /^$/ ) { next; }
+  my ($accession,$source,$feature,$start,$end,
+      $score,$strand,$frame,$raw_attributes) = split(/\t/,$_);
+  if ($feature ne $feature_arg) { next; }
+  my $attributes = parse_gtf_attributes($raw_attributes);
+  my $idattr = $attributes->{$id_arg};
+  if (!defined($idattr)) { die "<<$_>>,"; }
+  push @all_idattrs, $idattr;
+  # --------------------------------------------------
+  my $name;
+  {
+    my $locus_tag = $attributes->{locus_tag};
+    my $old_locus_tag = $attributes->{old_locus_tag};
+    my $locus_tag2 = $locus_tag;
+    if (defined($old_locus_tag)) {
+      if ($old_locus_tag =~ /%2C(.*)/) {
+	$old_locus_tag = $1;
+      }
+      $locus_tag2 .= "/" . $old_locus_tag;
+    }
+    my $gene_name = $attributes->{name};
+    if (defined($locus_tag) && defined($gene_name)) {
+      if ($locus_tag eq $gene_name) {
+	$name = $locus_tag2;
+      } else {
+	$name = join("/",$locus_tag2,$gene_name);
+      }
+    } elsif (defined($locus_tag)) {
+      $name = $locus_tag2;
+    } elsif (defined($gene_name)) {
+      $name = $gene_name;
+    }
+  }
+  my $str = "$accession:$start..$end/$strand";
+  if ( defined($name) ) {
+    $str .= "($name)";
+  }
+
+  # --------------------------------------------------
+  (!defined($idattr_row{$idattr})) || die "idattr=<<$idattr>>,";
+  $idattr_row{$idattr} = { "" => $str };
+}
+close($regions_fh);
+
+if ( $opt_u ) {
+  push @all_idattrs, "__not_aligned";
+}
+$idattr_row{"__not_aligned"} = { "" => "*"};
+
+
+# ------------------------------------------------------------------------
+# Process a each count file
+# ------------------------------------------------------------------------
+
+my @all_tags;
+foreach my $tag_file ( @tag_files ) {
+  my ($tag,@file) = split(/:/,$tag_file);
+  push @all_tags, $tag;
+  my $file = join(":",@file);
+  if ( $file eq "" ) {
+    print STDERR "Did you forget to tag the count file? <<$tag_file>>\n";
+    exit(1);
+  }
+  open (my $fh,"<",$file) || die "Cannot open <<$file>>,";
+  while (<$fh>) {
+    if (/^#/) { next; }
+    chomp;
+    my ($Geneid,$Chr,$Start,$End,$Strand,$Length,$count) = split(/\t/);
+    if ($Geneid eq "Geneid") { next; }
+    my $row = $idattr_row{$Geneid};
+    if (!defined($row)) { next; }
+    (!defined($row->{$tag})) || die;
+    $row->{$tag} = $count;
+  }
+  close $fh;
+}
+
+# ------------------------------------------------------------------------
+# Print the results.
+# ------------------------------------------------------------------------
+
+print join("\t","",@all_tags),"\n";
+
+foreach my $idattr ( @all_idattrs ) {
+  my $row = $idattr_row{$idattr};
+  defined($row) || die "idattr=<<$idattr>>,";
+  my @row = $row->{""};
+  foreach my $tag ( @all_tags ) {
+    my $v = $row->{$tag};
+    if (!defined($v)) {
+      $v = 0;
+    }
+    push @row, $v;
+  }
+  print join("\t",@row),"\n";
+}
+
+# ------------------------------------------------------------------------
+# done
+# ------------------------------------------------------------------------
+
