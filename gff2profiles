@@ -1,0 +1,236 @@
+#! /usr/bin/env perl
+
+use strict;
+use warnings FATAL => 'all';
+#use Carp::Always;
+
+# use FindBin;
+# use lib "$FindBin::Bin";
+# use Xyzzy;
+
+use constant { TRUE => 1, FALSE => 0 };
+
+# ------------------------------------------------------------------------
+# Process the command line
+# ------------------------------------------------------------------------
+
+use File::Basename;
+use Getopt::Std;
+
+our $opt_e;
+our $opt_d = ".";
+our $opt_h;
+our $opt_n = FALSE;
+our $opt_s = FALSE;
+
+sub usage {
+  print STDERR "Usage: $0 [options] genome.fna tag\n";
+
+  print STDERR "-d DIR - write output to DIR [$opt_d]\n";
+  print STDERR "-e - skip empty profiles\n";
+  print STDERR "-h - print help\n";
+  print STDERR "-n - make naive profiles\n";
+  print STDERR "-s - make sinister profiles\n";
+
+  exit(@_);
+}
+
+
+my $stat = getopts('d:ehns');
+if (!$stat) {
+  usage(1);
+}
+if ($opt_h) {
+  usage();
+}
+if (scalar(@ARGV) < 2) {
+  usage(1);
+}
+
+if (!$opt_s && !$opt_n) {
+  print STDERR "Either -s or -n must be specified.\n";
+  usage(1);
+}
+
+my $genome_fna = shift @ARGV;
+my $tag = shift @ARGV;
+
+# ------------------------------------------------------------------------
+
+
+my %contig_length;
+my %contig_empty;
+
+my $accession;
+my $len;
+
+sub notice_length {
+  if (!defined($accession)) {
+    return;
+  }
+  (!defined($contig_length{$accession}))
+    || die "<<$accession>> appears twice in genome,";
+  $contig_length{$accession} = $len;
+  $contig_empty{$accession} = TRUE;
+}
+
+open(my $genome_fh,"<",$genome_fna) || die "Cannot open <<$genome_fna>>,";
+while (<$genome_fh>) {
+  chomp;
+  if ( /^>([^ ]+)/ ) {
+    notice_length();
+    $accession = $1;
+    $len = 0;
+  } else {
+    $len += length($_);
+  }
+}
+notice_length();
+
+# ------------------------------------------------------------------------
+
+my %sinister_plus;
+my %sinister_minus;
+
+my %naive_plus;
+my %naive_minus;
+
+foreach my $accession (sort {$a cmp $b} (keys %contig_length)) {
+  my $len = $contig_length{$accession};
+
+  # print "$accession: $len\n";
+  
+  my $pp = [ ];
+  for (my $i=1; $i<=$len; $i++) {
+    push @$pp, 0;
+  }
+
+  my $nn = [ @$pp ];
+
+  if ( $opt_s && $opt_n ) {
+
+    $sinister_plus{$accession} = [ @$pp ];
+    $sinister_minus{$accession} = [ @$nn ];
+
+    $naive_plus{$accession} = $pp;
+    $naive_minus{$accession} = $nn;
+
+  } elsif ( $opt_s ) {
+
+    $sinister_plus{$accession} = $pp;
+    $sinister_minus{$accession} = $nn;
+
+  } elsif ( $opt_n ) {
+
+    $naive_plus{$accession} = $pp;
+    $naive_minus{$accession} = $nn;
+
+  } else {
+    die;
+  }
+
+}
+
+# ------------------------------------------------------------------------
+
+use constant { NO_VALUE => ";no-value;" };
+
+sub parse_gff_attributes {
+  my ($raw_attributes) = @_;
+  my $attributes = {};
+  foreach my $key_val (split(/; */,$raw_attributes)) {
+    my ($key,$val);
+    if ( $key_val =~ /^([^=]+)=(.*)/ ) {
+      ($key,$val) = ($1,$2);
+    } else {
+      ($key,$val) = ($key_val, NO_VALUE);
+    }
+    $attributes->{$key} = $val;
+  }
+  return $attributes;
+}
+
+while (<STDIN>) {
+  chomp;
+  my ($seqname,$source,$feature,$start,$end,
+      $score,$strand,$frame,$raw_attributes) = split(/\t/,$_);
+  #my $attributes = parse_gff_attributes($raw_attributes);
+
+  if (!defined($contig_length{$seqname})) { next; }
+  $contig_empty{$seqname} = FALSE;
+
+  if ($opt_s) {
+    if ($strand eq "-") {
+      $sinister_minus{$seqname}->[$end-1]++;
+    } else {
+      $sinister_plus{$seqname}->[$start-1]++;
+    }
+  }
+
+  if ($opt_n) {
+    my $a = ($strand eq "-") ? $naive_minus{$seqname} : $naive_plus{$seqname};
+    my $l = scalar(@$a);
+    # fixme: handle wrap-around
+    (1 <= $start && $start <= $l) || die "accession=$seqname, start=$start, end=$end, l=$l,";
+    (1 <= $end && $end <= $l) || die "accession=$seqname, start=$start, end=$end, l=$l,";
+    for (my $i=$start-1; $i<$end; $i++) {
+      $a->[$i]++;
+    }
+  }
+}
+
+# ------------------------------------------------------------------------
+
+sub fix_accession {
+  my ($accession) = @_;
+  if ($accession =~ /\|/) {
+    my @l = split(/\|/, $accession);
+    if (defined($l[0]) && $l[0] eq "gi") {
+      my $s = $l[3];
+      $s =~ s/\.[0-9]$//;
+      return $s;
+    } elsif (defined($l[0]) && $l[0] eq "lcl") {
+      return $l[1];
+    } else {
+      die "fix_accession(\"$accession\"),";
+    }
+  } elsif ($accession =~ / /) {
+    my @l = split(/ /, $accession);
+    if (defined($l[0])) {
+      return $l[0];
+    }
+  } else {
+    #die "fix_accession(\"$accession\"),";
+    $accession =~ s/\.[0-9]$//;
+    return $accession;
+  }
+}
+
+sub write_profile {
+  my ($accession,$tag,$type,$p,$m) = @_;
+  defined($p) || die;
+  defined($m) || die;
+  my $out_filename = ($opt_d."/".fix_accession($accession)."_".$tag.".".$type.".profile");
+  open(my $fh,">", $out_filename) || die;
+  my $l = scalar(@$p);
+  for (my $i=0; $i<$l; $i++) {
+    print $fh ${$p}[$i]," ",${$m}[$i],"\n";
+  }
+  close $fh;
+}
+
+foreach my $accession (keys %contig_length) {
+  if ($contig_empty{$accession} && $opt_e) {
+    next;
+  }
+  if ($opt_s) {
+    write_profile($accession,$tag,"sinister",
+		  $sinister_plus{$accession},
+		  $sinister_minus{$accession});
+  }
+  if ($opt_n) {
+    write_profile($accession,$tag,"naive",
+		  $naive_plus{$accession},
+		  $naive_minus{$accession});
+  }
+}

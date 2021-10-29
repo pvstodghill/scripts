@@ -1,0 +1,379 @@
+#! /usr/bin/env perl
+
+use strict;
+use warnings;
+use Getopt::Std;
+
+use constant { TRUE => 1, FALSE => 0 };
+
+# ------------------------------------------------------------------------
+
+my $options_specs = "";
+my $options_descr = "";
+
+sub notice_option {
+  my ($spec,$descr) = @_;
+  $options_specs .= $spec;
+  $options_descr .= $descr . "\n";
+}
+
+our $opt_c = "1,000,000"; notice_option("c:", "-c NUM - Process reads in chunks of size NUM. 0 disables chunking. [$opt_c]");
+our $opt_f = 0; notice_option("f", "-f - for tag use feature kind instead of location (*)");
+our $opt_h = 0; notice_option("h", "-h - print this message");
+our $opt_r = 0; notice_option("r", "-r - compute RKPM (*)");
+our $opt_t = 0; notice_option("t", "-t - include total number of reads");
+our $opt_u = 0; notice_option("u", "-u - add unmatched read count to end of table");
+
+$options_descr .= "\n";
+$options_descr .= "(*) -f and -r are mutually exclusive.\n";
+
+if (!getopts($options_specs)) {
+  usage(1);
+}
+
+sub usage {
+  print STDERR "Usage: $0 [options] REGIONS.gff tag1:file1.gff[.gz] tag2:file2.gff[.gz] ...\n";
+  print $options_descr;
+  exit(@_);
+}
+
+if ($opt_h) {
+  usage();
+}
+
+if ( $opt_f && $opt_r ) {
+  usage(1);
+}
+
+if (scalar(@ARGV) < 2) {
+  usage(1);
+}
+
+$opt_c =~ s/[,_]//g;
+
+my ($regions_fn, @tags_aligns) = @ARGV;
+
+# ------------------------------------------------------------------------
+# Read the regions. Store by replicon.
+# ------------------------------------------------------------------------
+
+my @all_regions;
+
+my %all_features; # all values of the "feature" column
+
+use constant { NO_VALUE => ";no-value;" };
+
+sub parse_gff_attributes {
+  my ($raw_attributes) = @_;
+  my $attributes = {};
+  foreach my $key_val (split(/; */,$raw_attributes)) {
+    my ($key,$val);
+    if ( $key_val =~ /^([^=]+)=(.*)/ ) {
+      ($key,$val) = ($1,$2);
+    } else {
+      ($key,$val) = ($key_val, NO_VALUE);
+    }
+    $attributes->{$key} = $val;
+  }
+  return $attributes;
+}
+
+open(my $regions_fh,"<",$regions_fn) || die "Cannot open: <<$regions_fn>>,";
+while (<$regions_fh>) {
+  chomp;
+  if ( /^#/ || /^$/ ) { next; }
+  my ($accession,$source,$feature,$start,$end,
+      $score,$strand,$frame,$raw_attributes) = split(/\t/,$_);
+  my $attributes = parse_gff_attributes($raw_attributes);
+  # --------------------------------------------------
+  my $name;
+  {
+    my $locus_tag = $attributes->{locus_tag};
+    my $old_locus_tag = $attributes->{old_locus_tag};
+    my $locus_tag2 = $locus_tag;
+    if (defined($old_locus_tag)) {
+      if ($old_locus_tag =~ /%2C(.*)/) {
+	$old_locus_tag = $1;
+      }
+      $locus_tag2 .= "/" . $old_locus_tag;
+    }
+    my $gene_name = $attributes->{Name};
+    if (defined($locus_tag) && defined($gene_name)) {
+      if ($locus_tag eq $gene_name) {
+	$name = $locus_tag2;
+      } else {
+	$name = join("/",$locus_tag2,$gene_name);
+      }
+    } elsif (defined($locus_tag)) {
+      $name = $locus_tag2;
+    } elsif (defined($gene_name)) {
+      $name = $gene_name;
+    }
+  }
+
+  $all_features{$feature} = TRUE;
+
+  # --------------------------------------------------
+  my $entry = {
+	       __accession__ => $accession,
+	       # __source__ => $source,
+	       __feature__ => $feature,
+	       __start__ => $start,
+	       __end__ => $end,
+	       # __score__ => $score,
+	       __strand__ => $strand,
+	       # __frame__ => $frame,
+	       # __attributes__ => $attributes,
+	      };
+  $entry->{__name__} = $name;
+  # --------------------------------------------------
+  push @all_regions, $entry;
+}
+close($regions_fh);
+
+my @all_features = sort (keys %all_features);
+
+# sort each set of regions by coordinates
+@all_regions =
+  sort { $a->{__accession__} cmp $b->{__accession__}
+	   || $a->{__start__} <=> $b->{__start__}
+		|| $a->{__end__} <=> $b->{__end__} }
+    @all_regions;
+
+# ------------------------------------------------------------------------
+# Process a chunk of alignment entries.
+# ------------------------------------------------------------------------
+
+sub process_chunk {
+  my ($tag,@chunk) = @_;
+  my $unmatched_count = 0;
+
+  @chunk =
+    sort { $a->{accession} cmp $b->{accession}
+	   || $a->{start} <=> $b->{start}
+	   || $a->{end} <=> $b->{end} }
+    @chunk;
+
+  my @regions = @all_regions;
+
+  foreach my $read_entry ( @chunk ) {
+
+  loop_region1:
+    # pop any regions that is entirely are to the "left" of the
+    # current read.
+    while (scalar(@regions) > 0) {
+      my $region_entry = $regions[0];
+      if ( ( $region_entry->{__accession__} lt $read_entry->{accession} )
+	   || ( ( $region_entry->{__accession__} eq $read_entry->{accession} )
+		&& ( $region_entry->{__end__} < $read_entry->{start} ) ) ) {
+	shift @regions;
+      } else {
+	last loop_region1;
+      }
+    }
+
+    my $unmatched = TRUE;
+
+  loop_region2:
+
+    # loop over reads until we encounter one that is entirely to the
+    # "right" of the current read, in which case we are done with the current read.
+    foreach my $region_entry (@regions) {
+      if ( ($read_entry->{accession} lt $region_entry->{__accession__}  )
+	   || ($read_entry->{end} < $region_entry->{__start__} ) ) {
+	last loop_region2;
+      }
+
+      (
+       ( $read_entry->{start} <= $region_entry->{__start__} &&
+	 $region_entry->{__start__} <= $read_entry->{end} ) ||
+       ( $region_entry->{__start__} <= $read_entry->{start}
+	 && $read_entry->{start} <= $region_entry->{__end__} )
+      ) || die;
+
+      if ( $read_entry->{strand} eq $region_entry->{__strand__}
+	   || $region_entry->{__strand__} eq "."
+	   || $region_entry->{__strand__} eq "?" ) {
+	$region_entry->{$tag}++;
+	$unmatched = FALSE;
+      }
+    }
+
+    if ($unmatched) {
+      $unmatched_count++;
+    }
+  }
+
+  return $unmatched_count;
+}
+
+
+# ------------------------------------------------------------------------
+# Function to read an entire alignment gff file and, for each
+# alignment, +1 the count for all overlapping regions.
+#
+# Entries from the alignment gff file are processed in chunks.
+# ------------------------------------------------------------------------
+
+my $chunk_size;
+if ($opt_c > 0) { $chunk_size = $opt_c; }
+
+sub process_tag_aligns {
+  my ($tag,$aligns_fn) = @_;
+
+  print STDERR "## processing ${tag}:${aligns_fn}\n";
+
+  foreach my $entry (@all_regions) {
+    $entry->{$tag} = 0;
+  }
+
+  my $unmatched_count = 0;
+  my $total_count = 0;
+
+  my $aligns_fh;
+  if ( $aligns_fn =~ /\.gz$/ ) {
+    open ($aligns_fh, "-|", "gzip -dc $aligns_fn") || die "Cannot open: <<$aligns_fn>>,";
+  } else {
+    open($aligns_fh,"<",$aligns_fn) || die "Cannot open: <<$aligns_fn>>,";
+  }
+
+  my @chunk = ();
+  while (<$aligns_fh>) {
+    chomp;
+    my ($accession,$source,$feature,$start,$end,
+	$score,$strand,$frame,$raw_attributes) = split(/\t/,$_);
+    push @chunk, {
+		  accession => $accession,
+		  start => $start,
+		  end => $end,
+		  strand => $strand
+		 };
+    if (defined($chunk_size) && scalar(@chunk) >= $chunk_size) {
+      $unmatched_count += process_chunk($tag,@chunk);
+      $total_count += scalar(@chunk);
+      print STDERR "## processed $total_count ($unmatched_count unmatched)\n";
+      @chunk = ();
+    }
+  }
+  if (scalar(@chunk) > 0) {
+    $unmatched_count += process_chunk($tag,@chunk);
+    $total_count += scalar(@chunk);
+    print STDERR "## processed $total_count ($unmatched_count unmatched)\n";
+    @chunk = ();
+  }
+
+  close($aligns_fh);
+
+  return ($unmatched_count,$total_count);
+}
+
+# ------------------------------------------------------------------------
+# For each alignment gff, read the file and count the number of
+# alignments that overlap with each feature. Store the results in each
+# region entry.
+# ------------------------------------------------------------------------
+
+my @all_tags;
+my @unmatched_counts;
+my @total_counts;
+
+foreach my $tag_aligns ( @tags_aligns ) {
+  my ($tag,@aligns_fn) = split(/:/,$tag_aligns);
+  push @all_tags, $tag;
+  my $aligns_fn = join(":",@aligns_fn);
+  if ( $aligns_fn eq "" ) {
+    print STDERR "Did you forget to tag the aligns GFF's? <<$tag_aligns>>\n";
+    exit(1);
+  }
+  # --------------------------------------------------
+  my ($unmatched_count,$total_count) =
+    process_tag_aligns($tag,$aligns_fn);
+  push @unmatched_counts, $unmatched_count;
+  push @total_counts, $total_count;
+}
+
+# ------------------------------------------------------------------------
+# Print the results.
+# ------------------------------------------------------------------------
+
+print join("\t","",@all_tags),"\n";
+
+if ( $opt_f ) {
+
+  my $feature_counts = {};
+
+  foreach my $feature ( @all_features ) {
+    my $values = $feature_counts->{$feature} = {};
+    foreach my $tag ( @all_tags ) {
+      $values->{$tag} = 0;
+    }
+  }
+
+  foreach my $entry ( @all_regions ) {
+    my $feature = $entry->{__feature__};
+    my $values = $feature_counts->{$feature};
+    foreach my $tag ( @all_tags ) {
+      my $count = $entry->{$tag};
+      if (!defined($count)) {
+	next;
+      }
+      $values->{$tag} += $count;
+    }
+  }
+
+  foreach my $feature (@all_features) {
+    my $values = $feature_counts->{$feature};
+    my @values;
+    foreach my $tag ( @all_tags ) {
+      push @values, $values->{$tag};
+    }
+    print join("\t",$feature,@values),"\n";
+
+  }
+
+} else {
+
+  foreach my $entry ( @all_regions ) {
+    my $accession = $entry->{__accession__};
+    my $feature = $entry->{__feature__};
+    my $start = $entry->{__start__};
+    my $end = $entry->{__end__};
+    my $strand = $entry->{__strand__};
+    my $name = $entry->{__name__};
+    my $str = "$accession:$start..$end/$strand";
+    if ( defined($name) ) {
+      $str .= "($name)";
+    }
+    my @values;
+    for (my $i=0; $i<scalar(@all_tags); $i++) {
+      my $tag = $all_tags[$i];
+      my $count = $entry->{$tag};
+      if (!defined($count)) {
+	$count = 0;
+      }
+      if ($opt_r) {
+	my $kilobases = ($end - $start + 1) / 1000.0;
+	my $million = $total_counts[$i] / 1000000.0;
+	$count = (1.0*$count) / ($kilobases * $million);
+      }
+      push @values, $count;
+    }
+    print join("\t",$str,@values),"\n";
+  }
+
+}
+
+if ( $opt_u ) {
+  print join("\t","*",@unmatched_counts),"\n";
+}
+
+if ( $opt_t ) {
+  print join("\t","total",@total_counts),"\n";
+}
+
+# # ------------------------------------------------------------------------
+
+# sub log10 {
+#   my $n = shift;
+#   return log($n)/log(10);
+# }
