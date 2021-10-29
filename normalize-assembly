@@ -1,0 +1,117 @@
+#! /bin/bash
+
+PROGNAME=`basename $0`
+PROGDIR=`dirname $0`
+
+MIN_ORF=10 # aa's
+
+# ------------------------------------------------------------------------
+
+_opt_d=tmp
+
+function usage {
+    echo 1>&2 "Usage: $0 [options] input.fna [prefix] > output.fna"
+
+    echo 1>&2 "-d DIR - work dir [$_opt_d]"
+    echo 1>&2 "-f FIRST.faa - first proteins library"
+    echo 1>&2 "-h - this message"
+
+    exit "$@"
+}    
+
+opt_d="$_opt_d"
+
+while getopts 'd:f:h' opt ; do
+    case "$opt" in
+
+	d) opt_d="$OPTARG" ;;
+	f) opt_f="$OPTARG" ;;
+	h) opt_h=1 ;;
+
+	\?) usage 1 ;;
+	*) echo "Can't happen" ; exit 1 ;;
+    esac
+done
+shift $((OPTIND-1))
+
+if [ "$opt_h" ] ; then
+    usage
+fi
+
+INPUT_FNA=$1 ; shift 1
+PREFIX=$1 ; shift 1
+if [ -z "$INPUT_FNA" ] ; then
+    usage 1
+fi
+
+WORKDIR="$opt_d"
+FIRST_FAA="$opt_f"
+
+if [ -e "$WORKDIR" ] ; then
+    echo 1>&2 "Work dir exists: $WORK_DIR"
+    exit 1
+fi
+
+# ------------------------------------------------------------------------
+
+mkdir -p "$WORKDIR"
+
+RENAMED="$WORKDIR"/__renamed__
+
+(
+    set -x
+    "$PROGDIR"/rename-contigs $PREFIX < "$INPUT_FNA" > "$RENAMED".fna
+)
+echo 1>&2 ''
+
+PROTEOME="$WORKDIR"/__proteome__
+
+(
+    set -x
+    "$PROGDIR"/make-db-6ft -f "$PROTEOME".faa -g "$PROTEOME".gff -s $[$MIN_ORF * 3] "$RENAMED".fna
+)
+echo 1>&2 ''
+
+FIRSTS="$WORKDIR"/__firsts__
+if [ "$FIRST_FAA" ] ; then
+    (
+	set -x
+	blastp -query "$FIRST_FAA" -subject "$PROTEOME".faa -evalue 1e-50 -outfmt 6 > "$FIRSTS".blast
+    )
+else
+    (
+	set -x
+	touch "$FIRSTS".blast
+    )
+fi
+cat "$FIRSTS".blast 1>&2
+echo 1>&2 ''
+
+BEST_BREAKS="$WORKDIR"/__best_breaks__
+(
+    set -x
+    "$PROGDIR"/find-best-breaks < "$PROTEOME".gff > "$BEST_BREAKS".txt
+)
+cat "$BEST_BREAKS".txt 1>&2
+echo 1>&2 ''
+
+(
+    set -x
+    "$PROGDIR"/split-fasta -d "$WORKDIR" -x .orig.fasta < "$RENAMED".fna
+)
+echo 1>&2 ''
+
+# ------------------------------------------------------------------------
+
+CMDS="$WORKDIR"/__cmds__
+
+(
+    set -x
+    "$PROGDIR"/$PROGNAME.pl "$WORKDIR" "$PROTEOME".gff "$FIRSTS".blast "$BEST_BREAKS".txt .orig.fasta .fasta > $CMDS.bash
+)
+echo 1>&2 ''
+
+# ------------------------------------------------------------------------
+
+set -x
+bash -x $CMDS.bash

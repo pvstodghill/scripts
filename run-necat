@@ -1,0 +1,134 @@
+#! /bin/bash
+
+set -e
+
+_opt_g=5m
+_opt_t=$(nproc --all)
+
+function usage {
+    echo 1>&2 "Usage: $0 [options] raw.fq ..."
+
+    echo 1>&2 "-H - don't use 'howto'; necat.pl must be on \$PATH"
+    echo 1>&2 "-f PACKAGES.yaml"
+    echo 1>&2 "-g SIZE - Genome size (can use these suffixes: kKmMgG) [$_opt_g]"
+    echo 1>&2 "-h - this message"
+    echo 1>&2 "-o FILENAME - Write assembly to FILENAME (compress if .gz) [STDOUT]"
+    echo 1>&2 "-t NUM - Use NUM threads [$_opt_t]"
+    echo 1>&2 "-v - verbose"
+    echo 1>&2 "-w DIR - Use and keep work directory, DIR. Otherwise, use and delete tmpdir"
+
+    exit "$@"
+}    
+
+# v-- add this if inside a function
+# local OPTIND opt_h opt_o
+
+opt_g=$_opt_g
+opt_t=$_opt_t
+
+while getopts 'Hf:g:ho:t:vw:' opt ; do
+    case "$opt" in
+
+	H) opt_H=1 ;;
+	f) opt_f="$OPTARG" ;;
+	g) opt_g="$OPTARG" ;;
+	h) opt_h=1 ;;
+	o) opt_o="$OPTARG" ;;
+	t) opt_t="$OPTARG" ;;
+	v) opt_v=1 ;;
+	w) opt_w="$OPTARG" ;;
+
+	\?) usage 1 ;;
+	*) echo "Can't happen" ; exit 1 ;;
+    esac
+done
+shift $((OPTIND-1))
+
+if [ "$opt_h" ] ; then
+    usage
+fi
+
+# ------------------------------------------------------------------------
+
+if [ "$opt_H" ] ; then
+    HOWTO=
+else
+    HOWTO="howto"
+    if [ -z "$opt_v" ] ; then
+	HOWTO="$HOWTO -q"
+    fi
+    if [ "$opt_f" ] ; then
+	HOWTO="$HOWTO -f $opt_f"
+    fi
+    $HOWTO -p necat.pl
+fi
+
+THREADS=$opt_t
+
+if [ "$opt_w" ] ; then
+    if [ -e "$opt_w" ] ; then
+    	echo 1>&2 "Already exists: $opt_w"
+    	exit 1
+    fi
+    DATA="$opt_w"
+    mkdir -p ${DATA}
+else
+    DATA=$(mktemp $(basename $0).XXXXXX)
+    trap "rm -f $DATA; exit 1" 0 1 2 3 13 15  # Exit, HUP, INT, QUIT, PIPE, TERM
+fi
+
+
+# ------------------------------------------------------------------------
+
+case "$opt_g" in
+    *k) FACTOR2=1000 ;;
+    *K) FACTOR2=1024 ;;
+    *m) FACTOR2=$[1000 * 1000] ;;
+    *M) FACTOR2=$[1024 * 1024] ;;
+    *g) FACTOR2=$[1000 * 1000 * 1000] ;;
+    *G) FACTOR2=$[1024 * 1024 * 1024] ;;
+    *) FACTOR2=1
+esac
+
+FACTOR1=$(echo $opt_g | sed 's/[kKmMgG]$//');
+
+SIZE=$(awk 'BEGIN{print ('$FACTOR1' * '$FACTOR2')}')
+
+# ------------------------------------------------------------------------
+
+${HOWTO} necat.pl config ${DATA}/config.txt
+
+sed -i -e 's|^PROJECT=$|PROJECT='${DATA}'|' ${DATA}/config.txt
+sed -i -e 's|^ONT_READ_LIST=$|ONT_READ_LIST='${DATA}/files.txt'|' ${DATA}/config.txt
+sed -i -e 's|^GENOME_SIZE=$|GENOME_SIZE='$SIZE'|' ${DATA}/config.txt
+sed -i -e 's|^THREADS=4$|THREADS='$THREADS'|' ${DATA}/config.txt
+
+for f in "$@" ; do
+    echo $f >> ${DATA}/files.txt
+done
+
+# ------------------------------------------------------------------------
+
+(
+    set -x
+
+    ${HOWTO} necat.pl correct ${DATA}/config.txt
+    ${HOWTO} necat.pl assemble ${DATA}/config.txt
+    ${HOWTO} necat.pl bridge ${DATA}/config.txt
+
+)
+
+# ------------------------------------------------------------------------
+
+RESULT_FASTA=${DATA}/6-bridge_contigs/polished_contigs.fasta
+if [ ! -e $RESULT_FASTA ] ; then
+    echo 1>&2 "Something went wrong. Output does not exist: $RESULT_FASTA"
+    exit 1
+fi
+
+case X"$opt_o"X in
+    XX|X-X) cat $RESULT_FASTA ;;
+    X*.gzX) cat $RESULT_FASTA | gzip > "$opt_o" ;;
+    X*X) cp $RESULT_FASTA "$opt_o"
+esac
+

@@ -1,0 +1,327 @@
+#! /bin/bash
+
+set -e
+#set -o pipefail
+
+SCRIPTS=$(dirname $0)
+
+function usage {
+    echo 1>&2 "Usage: $0 [options] [raw_long.fq[.gz] trimmed_long.fq[.gz]] raw_R1.fq[.gz] raw_R2.fq[.gz] trimmed_R1.fq[.gz] trimmed_R2.fq[.gz] final.fna[.gz] final.gff[.gz]"
+    echo 1>&2 "-S STRAIN - include STRAIN name in output"
+    echo 1>&2 "-H - suppress header with -s"
+    echo 1>&2 "-h - this message"
+    echo 1>&2 "-k - keep temp dir"
+    echo 1>&2 "-q - suppress diagnostic output"
+    echo 1>&2 "-p - long reads are PacBio (not Nanopore)"
+    echo 1>&2 "-s - short (2 lines: header + results) output"
+    echo 1>&2 "-t N - use N threads [all]"
+    echo 1>&2 "-f PACKAGES.yaml - use \"howto\" and PACKAGES.yaml"
+    exit "$@"
+}    
+
+while getopts 'S:Hf:hkpqst:' opt ; do
+    case "$opt" in
+
+	H) opt_H=1 ;;
+	S) opt_S="$OPTARG" ;;
+	f) opt_f="$OPTARG" ;;
+	h) opt_h=1 ;;
+	k) opt_k=1 ;;
+	p) opt_p=1 ;;
+	q) opt_q=1 ;;
+	s) opt_s=1 ;;
+	t) opt_t="$OPTARG" ;;
+
+	\?) usage 1 ;;
+	*) echo 1>&2 "Can't happen" ; exit 1 ;;
+    esac
+done
+shift $((OPTIND-1))
+
+if [ "$opt_h" ] ; then
+    usage
+fi
+
+if [ "$opt_t" ] ; then
+    THREADS=$opt_t
+else
+    THREADS=$(nproc --all)
+fi
+
+DIR=$(mktemp -p . -d)
+
+if [ "$opt_f" ] ; then
+    HOWTO="${SCRIPTS}/howto -q -T $DIR -f $opt_f"
+fi
+
+if [ -z "$6" -o "$9" ] ; then
+    usage 1
+fi
+
+if [ "$8" ] ; then
+    RAW_LONG_FQ="$1"
+    shift 1
+    TRIMMED_LONG_FQ="$1"
+    shift 1
+fi
+
+RAW_R1_FQ="$1" ; shift 1
+RAW_R2_FQ="$1" ; shift 1
+TRIMMED_R1_FQ="$1" ; shift 1
+TRIMMED_R2_FQ="$1" ; shift 1
+FINAL_FNA="$1" ; shift 1
+FINAL_GFF="$1" ; shift 1
+
+# ------------------------------------------------------------------------
+
+# ------------------------------------------------------------------------
+
+function log {
+    if [ -z "$opt_q" ] ; then
+	echo 1>&2 "## [$(date +'%Y-%m-%d %H:%M:%S')]" "$@"
+    fi
+}
+
+function safe_cat {
+    for f in "$@" ; do
+	case "$f" in
+	    *.gz) gzcat "$f" ;;
+	    *) cat "$f"
+	esac
+    done
+}
+
+function calc.1 {
+    perl -e 'printf("%.1f\n",'"$1"')'
+}
+
+
+# ------------------------------------------------------------------------
+
+
+
+log "Computing assembly stats"
+
+FNA_STATS=($(safe_cat "$FINAL_FNA" | ${SCRIPTS}/fastx2stats -s -a))
+FNA_NUM_SEQS=${FNA_STATS[0]}
+FNA_NUM_BASES=${FNA_STATS[1]}
+FNA_MEDIAN=${FNA_STATS[2]}
+FNA_MEAN=${FNA_STATS[3]}
+FNA_N50=${FNA_STATS[4]}
+FNA_L50=${FNA_STATS[5]}
+FNA_MIN_LEN=${FNA_STATS[6]}
+FNA_MAX_LEN=${FNA_STATS[7]}
+
+GENOME_SIZE=$FNA_NUM_BASES
+
+# ------------------------------------------------------------------------
+
+if [ "$RAW_LONG_FQ" ] ; then
+
+    log "Computing long-read stats"
+
+    LONG_STATS=($(safe_cat "$RAW_LONG_FQ" | ${SCRIPTS}/fastx2stats -s -q))
+    LONG_NUM_SEQS=${LONG_STATS[0]}
+    LONG_NUM_BASES=${LONG_STATS[1]}
+    LONG_MEDIAN=${LONG_STATS[2]}
+    LONG_MEAN=${LONG_STATS[3]}
+    LONG_N50=${LONG_STATS[4]}
+    LONG_L50=${LONG_STATS[5]}
+    LONG_MIN_LEN=${LONG_STATS[6]}
+    LONG_MAX_LEN=${LONG_STATS[7]}
+
+    LONG_THEORETICAL_COVERAGE=$(calc.1 "(1.0*$LONG_NUM_BASES)/$GENOME_SIZE")
+fi
+
+# ------------------------------------------------------------------------
+
+if [ "$TRIMMED_LONG_FQ" ] ; then
+
+    log "Computing aligned long-read bases"
+
+    LONG_MODEL=map-ont
+    if [ "$opt_p" ] ; then
+	LONG_MODEL=map-pb
+    fi
+
+    ${HOWTO} minimap2 -t ${THREADS} -a -x $LONG_MODEL \
+             ${FINAL_FNA} ${TRIMMED_LONG_FQ} \
+	     2>/dev/null \
+        | ${HOWTO} samtools view -h -F 0x900 \
+	| ${HOWTO} samtools sort -@ ${THREADS} 2>/dev/null \
+		   > $DIR/long.sam
+    
+    NUM_LONG_ALIGNED=$(
+	${HOWTO} samtools depth $DIR/long.sam \
+	    | cut -f3 \
+	    | gawk 'BEGIN {x=0} {x+=$1} END {print x}'
+		    )
+
+    LONG_ACTUAL_COVERAGE=$(calc.1 "(1.0*$NUM_LONG_ALIGNED)/$GENOME_SIZE")
+fi
+
+# ------------------------------------------------------------------------
+
+log "Computing aligned Illumina bases"
+
+safe_cat $FINAL_FNA > $DIR/final.fna
+${HOWTO} bowtie2-build -q $DIR/final.fna $DIR/final.fna
+${HOWTO} bowtie2 --threads ${THREADS} --quiet \
+	-x $DIR/final.fna \
+	-1 $TRIMMED_R1_FQ -2 $TRIMMED_R2_FQ \
+    | ${HOWTO} samtools view -h -F 0x900 \
+    | ${HOWTO} samtools sort -@ ${THREADS} 2>/dev/null \
+	       > $DIR/illumina.sam
+
+NUM_ILLUMINA_ALIGNED=$(
+    ${HOWTO} samtools depth $DIR/illumina.sam \
+	| cut -f3 \
+	| gawk 'BEGIN {x=0} {x+=$1} END {print x}'
+		    )
+
+ILLUMINA_ACTUAL_COVERAGE=$(calc.1 "(1.0*$NUM_ILLUMINA_ALIGNED)/$GENOME_SIZE")
+
+# ------------------------------------------------------------------------
+
+log "Computing rest of results"
+
+READ_LENGTH=$[ $(safe_cat "$RAW_R1_FQ" | head -n2 | tail -n1 | wc --chars) - 1 ]
+NUM_READS=$[ $(safe_cat "$RAW_R1_FQ" | wc -l) / 4 ]
+
+ILLUMINA_THEORETICAL_COVERAGE=$(calc.1 "(2.0*$NUM_READS*$READ_LENGTH)/$GENOME_SIZE")
+
+# ------------------------------------------------------------------------
+
+NUM_CONTIGS=$(safe_cat "$FINAL_FNA" | fgrep '>' | wc -l)
+
+# ------------------------------------------------------------------------
+
+safe_cat "$FINAL_FNA" \
+    | fgrep -v '>' \
+    | sed -e 's/\([A-Z]\)\([A-Z]\)/\1\n\2/g' \
+	  -e 's/\([A-Z]\)\([A-Z]\)/\1\n\2/g' \
+	  > $DIR/bases.txt
+
+NUM_GC=$(cat $DIR/bases.txt | egrep '[GC]' | wc -l)
+NUM_NS=$(cat $DIR/bases.txt | fgrep N | wc -l)
+
+PERS_GC=$(calc.1 "(100.0*$NUM_GC)/$GENOME_SIZE")
+
+# ------------------------------------------------------------------------
+
+if [ "$FNA_NUM_SEQS" != "$NUM_CONTIGS" ] ; then
+    echo "ack! <1>"
+    exit 1
+fi
+
+# ------------------------------------------------------------------------
+
+NUM_GENES=$(safe_cat $FINAL_GFF | egrep -v '^#' | cut -f3 | egrep '^gene$' | wc -l)
+NUM_CDSS=$(safe_cat $FINAL_GFF | egrep -v '^#' | cut -f3 | egrep '^CDS$' | wc -l)
+NUM_RRNAS=$(safe_cat $FINAL_GFF | egrep -v '^#' | cut -f3 | egrep '^rRNA$' | wc -l)
+NUM_PSEUDOGENES=$(safe_cat $FINAL_GFF | egrep -v '^#' | cut -f3 | egrep '^pseudogene$' | wc -l)
+
+# ------------------------------------------------------------------------
+
+function print_title {
+    if [ -z "$opt_s" ] ; then
+	echo "$@"
+    fi
+}
+
+
+if [ "$opt_S" ] ; then
+    header="Strain"
+    fields="$opt_S"
+else
+    header=""
+    fields=""
+fi
+
+function print_value {
+    if [ "$header" ] ; then
+	header="$header"$'\t'
+	fields="$fields"$'\t'
+    fi
+    header="$header""$1"
+    fields="$fields""$2"
+    if [ -z "$opt_s" ] ; then
+	echo "$1" "$2"
+    fi
+    values_printed=1
+}
+
+function print_break {
+    if [ -z "$opt_s" ] ; then
+	echo
+    fi
+}
+
+function flush_output {
+    if [ "$opt_s" ] ; then
+	if [ -z "$opt_H" ] ; then
+	    echo "$header"
+	fi
+	echo "$fields"
+    fi
+}
+
+if [ "$LONG_NUM_SEQS" ] ; then
+    print_title '** Long Reads **'
+    print_value 'Num raw reads' $LONG_NUM_SEQS
+    print_value 'Num raw bases' $LONG_NUM_BASES
+    print_value 'Minimum length' $LONG_MIN_LEN
+    print_value 'Maximum length' $LONG_MAX_LEN
+    print_value 'Median length' $LONG_MEDIAN
+    print_value 'Mean length' $LONG_MEAN
+    print_value 'N50' $LONG_N50
+    print_value 'L50' $LONG_L50
+    print_value 'Theoretical Coverage' $LONG_THEORETICAL_COVERAGE
+    print_value 'Actual Coverage' $LONG_ACTUAL_COVERAGE
+    print_break
+fi 
+
+print_title '** Illumina **'
+print_value 'Num raw reads' $NUM_READS x 2
+print_value 'Raw read length' $READ_LENGTH
+print_value 'Theoretical Coverage' $ILLUMINA_THEORETICAL_COVERAGE
+print_value 'Actual Coverage' $ILLUMINA_ACTUAL_COVERAGE
+print_break
+
+if [ "$LONG_NUM_SEQS" ] ; then
+    print_title '** Assembled Genome **'
+    print_value 'Genome size (bp)' $GENOME_SIZE
+    print_value 'Replicons' $NUM_CONTIGS
+    print_value 'G+C content' $PERS_GC'%'
+    print_value "N's:" $NUM_NS
+else
+    print_title '** Assembled Genome **'
+    print_value 'Genome size (bp)' $GENOME_SIZE
+    print_value 'Contigs' $NUM_CONTIGS
+    print_value 'G+C content' $PERS_GC'%'
+    print_value "N's:" $NUM_NS
+    print_value 'N50' $FNA_N50
+    print_value 'L50' $FNA_L50
+fi
+
+print_break
+
+print_title '** Annotation **'
+print_value 'Num "gene" features' $NUM_GENES
+print_value 'Num "CDS" features' $NUM_CDSS
+print_value 'Num "rRNA" features' $NUM_RRNAS
+print_value 'Num "pseudogene" features' $NUM_PSEUDOGENES
+
+flush_output
+
+# ------------------------------------------------------------------------
+
+if [ -z "$opt_k" ] ; then
+    rm -rf $DIR
+else
+    log "Keeping temp dir: $DIR"
+fi
+
+# ------------------------------------------------------------------------
+
+log "Computing aligned (long-read) bases"

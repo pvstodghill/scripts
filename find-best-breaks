@@ -1,0 +1,94 @@
+#! /usr/bin/env perl
+
+use strict;
+use warnings FATAL => 'all';
+use Carp::Always;
+
+# use FindBin;
+# use lib "$FindBin::Bin";
+# use Xyzzy;
+
+use constant { TRUE => 1, FALSE => 0 };
+
+# ------------------------------------------------------------------------
+
+use constant { NO_VALUE => ";no-value;" };
+
+sub parse_gff_attributes {
+  my ($raw_attributes) = @_;
+  my $attributes = {};
+  foreach my $key_val (split(/; */,$raw_attributes)) {
+    my ($key,$val);
+    if ( $key_val =~ /^([^=]+)=(.*)/ ) {
+      ($key,$val) = ($1,$2);
+    } else {
+      ($key,$val) = ($key_val, NO_VALUE);
+    }
+    $attributes->{$key} = $val;
+  }
+  return $attributes;
+}
+
+
+
+# ------------------------------------------------------------------------
+
+my %lens;
+my %vectors;
+
+while (<STDIN>) {
+  chomp;
+
+  if ( /^#/ ) {
+    if ( /^##sequence-region (.+) 1 ([0-9]+)$/ ) {
+      my ($accession,$len) = ($1,$2);
+      (!defined($vectors{$accession})) || die;
+      my $v = ["bogus"];
+      for (my $i=1; $i<=$len; $i++) {
+	push @$v, 0;
+      }
+      $vectors{$accession} = $v;
+      $lens{$accession} = $len;
+    }
+    next;
+  }
+
+  my ($seqname,$source,$feature,$start,$end,
+      $score,$strand,$frame,$raw_attributes) = split(/\t/,$_);
+  my $attributes = parse_gff_attributes($raw_attributes);
+  my $v = $vectors{$seqname};
+  my $len = $lens{$seqname};
+  defined($v) || die;
+  my $n = $end - $start + 1;
+  for (my $i=$start; $i<=$end; $i++) {
+    my $j = $i;
+    if ( $j < 1 ) {
+      $j += $len;
+    } elsif ( $len < $j ) {
+      $j -= $len;
+    }
+    $v->[$j] += $n;
+  }
+
+}
+
+# ------------------------------------------------------------------------
+
+foreach my $accession ( sort (keys %vectors) ) {
+  my $v = $vectors{$accession};
+  my $len = $#{$v};
+
+  my $min = $v->[1];
+  my @pos = (1);
+  for (my $i=2; $i<=$len; $i++) {
+    if ( $v->[$i] < $min ) {
+      $min = $v->[$i];
+      @pos = ($i);
+    } elsif ($v->[$i] == $min) {
+      push @pos, $i;
+    }
+  }
+  print $accession,": ", $min," (",join(",",@pos),")\n";
+}
+
+

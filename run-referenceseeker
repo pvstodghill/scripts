@@ -1,0 +1,65 @@
+#! /bin/bash
+
+if [ -z "$REFSEEK" ] ; then
+    if [ -d $HOME/scratch/referenceseeker ] ; then
+	REFSEEK=$HOME/scratch/referenceseeker
+    else
+	echo 1>&2 REFSEEK not set
+	exit 1
+    fi
+elif [ ! -d "$REFSEEK" ] ; then
+    echo 1>&2 $REFSEEK does not exist
+    exit 1
+fi
+
+function usage {
+    echo 1>&2 "Usage: $0 [options] genome.fna"
+    echo 1>&2 "-h - this message"
+    echo 1>&2 "-p PACKAGES.yaml"
+    exit "$@"
+}    
+
+while getopts 'hp:' opt ; do
+    case "$opt" in
+	h) opt_h=1 ;;
+	p) opt_p="$OPTARG" ;;
+	\?) usage 1 ;;
+	*) echo 1>&2 "Can't happen" ; exit 1 ;;
+    esac
+done
+shift $((OPTIND-1))
+
+if [ "$opt_h" ] ; then
+    usage
+fi
+
+if [ -z "$1" -o "$2" ] ; then
+    usage 1
+fi
+
+rm -rf $REFSEEK/temp
+mkdir -p $REFSEEK/temp/tmp
+
+cp "$1" $REFSEEK/temp/genome.fasta
+
+HOWTO="howto -q -T temp/tmp"
+if [ "$opt_p" ] ; then
+    cp $opt_p $REFSEEK/temp/packages.yaml
+    # HOWTO+=" -p temp/packages.yaml"
+fi
+
+echo "${PS4}cd $REFSEEK"
+cd $REFSEEK
+
+
+echo 1>&2 '### Refseq'
+(
+    set -x
+    ${HOWTO} referenceseeker ./bacteria-refseq ./temp/genome.fasta
+)
+echo 1>&2 '### GTDB'
+(
+    set -x
+    ${HOWTO} referenceseeker ./bacteria-gtdb ./temp/genome.fasta
+)
+

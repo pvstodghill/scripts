@@ -1,0 +1,59 @@
+#! /usr/bin/env perl
+
+use strict;
+use warnings FATAL => 'all';
+use Carp::Always;
+
+# use FindBin;
+# use lib "$FindBin::Bin";
+# use Xyzzy;
+
+use constant { TRUE => 1, FALSE => 0 };
+
+my $cutoff=200;			# docs say 199, but is that right?
+my $width=70;
+
+my $defline;
+my $seq;
+
+my @removed;
+
+sub emit {
+  if (!defined($defline)) {
+    return;
+  }
+  if (length($seq) < $cutoff) {
+    ($defline =~ /^> *([^ ]+)/) || die "defline = <<$defline>>,";
+    my $name = $1;
+    push @removed, $name;
+    return;
+  }
+
+  print $defline,"\n";
+  while (length($seq) > $width) {
+    my $s = substr($seq,0,$width);
+    $seq = substr($seq,$width);
+    print $s,"\n";
+  }
+  if (length($seq) > 0) {
+    print $seq,"\n";
+  }
+}
+
+while (<STDIN>) {
+  chomp;
+  if (/^>/) {
+    emit();
+    $defline = $_;
+    $seq = "";
+  } else {
+    (defined($defline)) || die;
+    $seq .= $_;
+  }
+}
+emit();
+
+if (scalar(@removed) > 0) {
+  print STDERR "# Too small for PGAP (and removed):\n";
+  print STDERR join(" ",@removed),"\n";
+}

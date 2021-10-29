@@ -1,0 +1,134 @@
+#! /usr/bin/env perl
+
+# ------------------------------------------------------------------------
+# Note: Genomic coordinates use 1-based indexing. Perl strings use
+# 0-based indexing.
+# ------------------------------------------------------------------------
+
+use strict;
+use warnings FATAL => 'all';
+use Carp::Always;
+
+# use FindBin;
+# use lib "$FindBin::Bin";
+# use Xyzzy;
+
+use constant { TRUE => 1, FALSE => 0 };
+
+# ------------------------------------------------------------------------
+# Process the command line
+# ------------------------------------------------------------------------
+
+use File::Basename;
+use Getopt::Std;
+
+our $opt_h;
+our $opt_n;
+
+sub usage {
+  my $progname = basename($0);
+  print STDERR "Usage: $progname [options] (+|-) POS [FILE]\n";
+  print STDERR "-n STR - Replace defline with STR\n";
+  print STDERR "-h - print help\n";
+  exit(@_);
+}
+
+my $stat = getopts('hn:');
+if (!$stat) {
+  usage(1);
+}
+if ($opt_h) {
+  usage();
+}
+
+my ($strand,$pos,$file,$extra) = @ARGV;
+
+if (!defined($pos) || defined($extra)) {
+  usage(1);
+}
+
+if ($strand ne "+" && $strand ne "-") {
+  print STDERR "Invalid strand: <<$strand>>\n";
+  exit(1);
+}
+
+if ( $pos <= 0 ) {
+  print STDERR "Invalid position: <<$pos>>\n";
+  exit(1);
+}
+
+# ------------------------------------------------------------------------
+# Read the file
+# ------------------------------------------------------------------------
+
+my $fh;
+if ($file) {
+  open($fh, "<", $file) || die "Cannot open <<$file>>,";
+} else {
+  $fh = *STDIN;
+}
+
+my $defline;
+my $seq = "";
+
+while (<$fh>) {
+  chomp;
+  if (/^>/) {
+    (!defined($defline)) || die "Multiple sequences found,";
+    $defline = $_;
+  } else {
+    $seq .= $_;
+  }
+}
+
+close $fh || die;
+
+if ( length($seq) < $pos ) {
+  print STDERR "position out of bounds: <<$pos>>\n";
+  exit(1);
+}
+# ------------------------------------------------------------------------
+# Reverse and complement, if needed
+# ------------------------------------------------------------------------
+
+if ($strand eq "-") {
+  # reverse
+  $seq = reverse($seq);
+  # complement
+  $seq =~ tr/acgtmrwsykvhdbnACGTMRWSYKVHDBN./tgcakywsrmbdhvnTGCAKYWSRMBDHVN./;
+
+  $strand = "+";
+  $pos = length($seq) - $pos + 1;
+}
+
+# ------------------------------------------------------------------------
+# Rotate the sequence so $pos has index 1
+# ------------------------------------------------------------------------
+
+($strand eq "+") || die "cannot happen,";
+
+my $seq2 = substr($seq, $pos-1) . substr($seq,0,$pos-1);
+
+# ------------------------------------------------------------------------
+# Print the output
+# ------------------------------------------------------------------------
+
+my $w = 70;
+
+if ( defined($opt_n) ) {
+  if ($opt_n !~ /^>/) {
+    $opt_n = ">".$opt_n;
+  }
+  print $opt_n,"\n";
+} else {
+  print $defline,"\n";
+}
+
+while (length($seq2) > $w) {
+  my $s = substr($seq2,0,$w);
+  $seq2 = substr($seq2,$w);
+  print $s,"\n";
+}
+if ($seq2 ne "") {
+  print $seq2,"\n";
+}

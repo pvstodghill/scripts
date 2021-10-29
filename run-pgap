@@ -1,0 +1,256 @@
+#! /bin/bash
+
+set -e
+
+BACKEND=singularity
+
+# ------------------------------------------------------------------------
+
+OUT_DIR=pgap_out
+
+function usage {
+    echo 1>&2 "Usage: $0 [options] genome1.fna [...] [-- pgap.py args]"
+
+    echo 1>&2 "-S STRAIN_NAME - strain name (required)"
+    echo 1>&2 "-U - update PGAP, then exit"
+    echo 1>&2 "-f - force overwriting of existing files."
+    echo 1>&2 "-h - this message"
+    echo 1>&2 "-k - keep temporary files"
+    echo 1>&2 "-n - fake execution"
+    echo 1>&2 "-o OUT_DIR - Output directory [$OUT_DIR]"
+    echo 1>&2 "-p PGAP_DIR - Directory containing PGAP. Will download if not specified."
+    echo 1>&2 "-s SUBMOL_YAML - submol.yaml to use instead of generated"
+    echo 1>&2 "-t TAXON_ID - taxon id for species"
+    echo 1>&2 "-u - update PGAP before running"
+
+    echo 1>&2 ''
+    echo 1>&2 "Either '-s', '-t', or '-U' option must be specified"
+
+    exit "$@"
+}    
+
+while getopts 'S:Ufhkno:p:s:t:u' opt ; do
+    case "$opt" in
+
+	S) STRAIN_NAME="$OPTARG" ;;
+	U) UPDATE_PGAP=1 ; THEN_EXIT=1 ;;
+	f) FORCE=1 ;;
+	h) DISPLAY_HELP=1 ;;
+	k) KEEP_FILES=1 ;;
+	n) FAKE_IT=1 ;;
+	o) OUT_DIR="$OPTARG" ;;
+	p) PGAP_DIR="$OPTARG" ;;
+	s) SUBMOL_YAML="$OPTARG" ;;
+	t) TAXON_ID="$OPTARG" ;;
+	u) UPDATE_PGAP=1 ;;
+
+	\?) usage 1 ;;
+	*) echo "Can't happen" ; exit 1 ;;
+    esac
+done
+shift $((OPTIND-1))
+
+if [ "$DISPLAY_HELP" ] ; then
+    usage
+fi
+
+ARG_COUNT=
+if [ "$SUBMOD_YAML" ] ; then ARG_COUNT+=1 ; fi
+if [ "$TAXON_ID" ] ; then ARG_COUNT+=1 ; fi
+if [ "$THEN_EXIT" ] ; then ARG_COUNT+=1 ; fi
+if [ "$ARG_COUNT" != 1 ] ; then
+    usage 1
+fi
+
+if [ -z "$THEN_EXIT" ] ; then
+    if [ -z "$1" -o x"$1"x = x--x ] ; then
+	usage 1
+    fi
+fi
+
+# ------------------------------------------------------------------------
+
+if [ -e $OUT_DIR -a -z "$FORCE" ] ; then
+    echo 1>&2 "Output directory already exists: $OUT_DIR"
+    exit 1
+fi
+
+# ------------------------------------------------------------------------
+
+function run {
+    echo 1>&2 + "$@"
+    eval "$@"
+}
+
+function run_maybe {
+    if [ "$FAKE_IT" ] ; then
+	echo 1>&2 '### fake:' "$@"
+    else
+	echo 1>&2 + "$@"
+	eval "$@"
+    fi
+}
+
+if [ "$PGAP_DIR" ] ; then
+    if [ ! -e "$PGAP_DIR" ] ; then
+	echo 1>&2 "$PGAP_DIR does not exist"
+	exit 1
+    fi
+elif [ -d $HOME/scratch/pgap ] ; then
+    PGAP_DIR=$HOME/scratch/pgap
+else
+    PGAP_DIR=${OUT_DIR}/pgap_dist
+    echo "# Downloading PGAP to ${PGAP_DIR}"
+    (
+	mkdir -p ${PGAP_DIR}
+	run cd ${PGAP_DIR}
+	run_maybe wget -q https://github.com/ncbi/pgap/raw/prod/scripts/pgap.py
+	run_maybe chmod +x pgap.py
+	run_maybe ./pgap.py -D ${BACKEND} --update --taxcheck
+    )
+    UPDATE_PGAP= # skip updating again
+fi
+
+# ------------------------------------------------------------------------
+
+if [ "$UPDATE_PGAP" ] ; then
+    (
+	run	cd ${PGAP_DIR}
+	run_maybe rm -f pgap.py
+	run_maybe wget -q https://github.com/ncbi/pgap/raw/prod/scripts/pgap.py
+	run_maybe chmod +x pgap.py
+	run_maybe ./pgap.py -D ${BACKEND} --update --taxcheck
+    )
+fi
+if [ "$THEN_EXIT" ] ; then
+    exit
+fi
+
+# ------------------------------------------------------------------------
+
+if [ -e "${PGAP_DIR}/temp" -a -z "$FORCE" ] ; then
+    echo 1>&2 "${PGAP_DIR}/temp already exists"
+    exit 1
+fi
+
+rm -rf ${PGAP_DIR}/temp
+mkdir -p ${PGAP_DIR}/temp/input
+
+while [ -n "$1" -a x"$1"x != x--x ] ; do
+    cat "$1" >> ${PGAP_DIR}/temp/input/genome.fna
+    shift 1
+done
+if [ x"$1"x == x--x ] ; then
+    shift 1
+fi
+
+# ------------------------------------------------------------------------
+
+function get_species {
+    TAXON_ID=$1
+    efetch -db taxonomy -id $TAXON_ID \
+	| (\
+	   read first_line
+	   read second_line
+	   case "$second_line" in
+	       species,*) : ok ;;
+	       *)
+		   echo 1>&2 "Taxid $TAXON_ID does not have species rank."
+		   return 1
+	   esac
+	   echo "$first_line" | sed -r -e 's/^[0-9]+[.] +//'
+    )
+}    
+
+
+if [ "$SUBMOL_YAML" ] ; then
+    cp --archive "$SUBMOL_YAML" ${PGAP_DIR}/temp/input/submol.yaml
+elif [ "$TAXON_ID" ] ; then
+    SPECIES_NAME="$(get_species "$TAXON_ID")"
+    if [ $? != 0 ] ; then
+	exit 1
+    fi
+    cat $0.submol.yaml \
+	| sed -e 's/%%SPECIES%%/'"$SPECIES_NAME"'/g' \
+	| sed -e 's/%%STRAIN%%/'"$STRAIN_NAME"'/g' \
+	      > ${PGAP_DIR}/temp/input/submol.yaml
+fi
+
+# ------------------------------------------------------------------------
+
+cat <<EOF > ${PGAP_DIR}/temp/input/input.yaml
+fasta:
+  class: File
+  location: genome.fna
+submol:
+  class: File
+  location: submol.yaml
+
+EOF
+
+# ------------------------------------------------------------------------
+
+(
+    run	cd ${PGAP_DIR}
+    ulimit -n 8192
+    (
+	set +e # keep going even if pgap.py fails
+	run_maybe ./pgap.py -D ${BACKEND} --output temp/output "$@" temp/input/input.yaml
+	true # keep going even if pgap.py fails
+    )
+    if [ "$FAKE_IT" ] ; then
+	# check for input files
+	for f in temp/input/genome.fna \
+		     temp/input/input.yaml \
+		     temp/input/submol.yaml
+	do
+	    if [ ! -e "$f" ] ; then
+		echo 1>&2 "internal error: $f missing"
+		exit 1
+	    fi
+	done
+	# fake output files
+	mkdir temp/output
+	touch temp/output/annot.faa
+	touch temp/output/annot.fna
+	touch temp/output/annot.gbk
+	touch temp/output/annot.gff
+	touch temp/output/annot.sqn
+	touch temp/output/cwltool.log
+	cp --archive temp/input/genome.fna output/
+	cp --archive temp/input/submol.yaml output/
+    fi
+)
+
+# ------------------------------------------------------------------------
+
+if [ ! -e ${PGAP_DIR}/temp/output/annot.gbk ] ; then
+    echo 2>&1 '# ***********************'
+    echo 2>&1 '# * !!! PGAP Failed !!! *'
+    echo 2>&1 '# ***********************'
+    echo 2>&1 '#'
+    echo 2>&1 '# Output can be found:' ${PGAP_DIR}/temp/output
+    if [ -e ${PGAP_DIR}/temp/output/calls.tab ] ; then
+	echo 2>&1 '# Head of:' ${PGAP_DIR}/temp/output/calls.tab
+	head ${PGAP_DIR}/temp/output/calls.tab
+    fi
+    exit 1
+fi
+
+# ------------------------------------------------------------------------
+
+mkdir -p ${OUT_DIR}
+cp --archive ${PGAP_DIR}/temp/output/* ${OUT_DIR}
+cp --archive ${PGAP_DIR}/temp/input/input.yaml ${OUT_DIR}
+
+if [ -z "$KEEP_FILES" ] ; then
+    (
+	set +e
+	# set -x
+	chmod -R u+w ${PGAP_DIR}/temp
+	rm -rf ${PGAP_DIR}/temp
+    )
+fi
+
+# ------------------------------------------------------------------------
+

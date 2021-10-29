@@ -1,0 +1,32 @@
+#! /usr/bin/env perl
+
+use strict;
+use warnings;
+
+#! /usr/bin/env perl
+
+use strict;
+use warnings;
+
+use FindBin;
+use lib "$FindBin::Bin";
+use PVS;
+
+my ($file,$nothing) = @ARGV;
+if (defined($nothing)) {
+  print STDERR "Usage: $0 [FASTA_FILE]\n";
+  exit(1);
+}
+if ( !defined($file) ) {
+  $file = "-";
+}
+my %h = PVS::read_fasta($file);
+
+foreach my $defline ( sort (keys %h) ) {
+  my $sequence = $h{$defline};
+  my ($accession) = split(" ",$defline);
+  $accession =~ s/\.[0-9]+$//;
+  my $l = length($sequence);
+  printf "##sequence-region %s 1 %d\n", $accession, $l;
+}
+

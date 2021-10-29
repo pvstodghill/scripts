@@ -1,0 +1,123 @@
+#! /usr/bin/env perl
+
+use strict;
+use warnings FATAL => 'all';
+use Carp::Always;
+
+# use FindBin;
+# use lib "$FindBin::Bin";
+# use Xyzzy;
+
+use constant { TRUE => 1, FALSE => 0 };
+
+# ------------------------------------------------------------------------
+# Process the command line
+# ------------------------------------------------------------------------
+
+use File::Basename;
+use Getopt::Std;
+
+our $opt_d;
+our $opt_h;
+our $opt_w = 70;
+
+sub usage {
+  my $progname = basename($0);
+  print STDERR "Usage: $progname [options] [prefix]\n";
+  print STDERR "-d - it's a draft\n";
+  print STDERR "-h - print help\n";
+  print STDERR "-w NUM - Sequence width [$opt_w]\n";
+  exit(@_);
+}
+
+my $stat = getopts('dhw:');
+if (!$stat) {
+  usage(1);
+}
+if ($opt_h) {
+  usage();
+}
+if (scalar(@ARGV) > 1) {
+  usage(1);
+}
+
+my ($prefix) = @ARGV;
+if (!defined($prefix)) {
+  $prefix = "";
+}
+
+# ------------------------------------------------------------------------
+
+my %circular;
+my %contigs;
+
+my $defline;
+my $seq;
+
+sub emit {
+  if (!defined($defline)) {
+    return;
+  }
+  ($defline =~ /^> *([^ ]+)/) || die "defline = <<$defline>>,";
+  my $name = $1;
+  (!defined($contigs{$name})) || die "<<$name>> appears twice,";
+  $contigs{$name} = $seq;
+  if ( $defline =~ / circular=true/ ) {
+    $circular{$name} = TRUE;
+  } else {
+    $circular{$name} = FALSE;
+  }
+}
+
+while (<STDIN>) {
+  chomp;
+  if (/^>/) {
+    emit();
+    $defline = $_;
+    $seq = "";
+  } else {
+    (defined($defline)) || die;
+    $seq .= $_;
+  }
+}
+emit();
+
+# ------------------------------------------------------------------------
+
+my @names = keys %contigs;
+@names = sort { length($contigs{$b}) <=> length($contigs{$a}) } @names;
+
+my $i = 1;
+foreach my $old_name ( @names ) {
+  my $seq = $contigs{$old_name};
+
+  my $new_name;
+  if ( $opt_d ) {
+    $new_name = $old_name;
+  } elsif ( $i == 1 ) {
+    my $n = length($seq);
+    ($n > 1_000_000) || die "that's a mighty short chromosome (n=$n)...,";
+    $new_name = "chromosome";
+  } else {
+    $new_name = "plasmid".chr(ord("A") + $i - 2);
+  }
+
+  $new_name = $prefix.$new_name;
+  print STDERR join(" ","#",$old_name,"->",$new_name, , length($seq)),"\n";
+  my $defline = join("",">",$new_name," ", length($seq));
+  if ($circular{$old_name}) {
+    $defline .= " circular";
+  }
+  print $defline,"\n";
+
+  while (length($seq) > $opt_w) {
+    my $s = substr($seq,0,$opt_w);
+    $seq = substr($seq,$opt_w);
+    print $s,"\n";
+  }
+  if (length($seq) > 0) {
+    print $seq,"\n";
+  }
+
+  $i++;
+}

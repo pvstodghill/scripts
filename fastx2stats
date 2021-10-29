@@ -1,0 +1,155 @@
+#! /usr/bin/env perl
+
+use strict;
+use warnings FATAL => 'all';
+use Carp::Always;
+use POSIX;
+
+# use FindBin;
+# use lib "$FindBin::Bin";
+# use Xyzzy;
+
+use constant { TRUE => 1, FALSE => 0 };
+
+# ------------------------------------------------------------------------
+# Process the command line
+# ------------------------------------------------------------------------
+
+use File::Basename;
+use Getopt::Std;
+
+our $opt_a = 0;
+our $opt_h;
+our $opt_s;
+our $opt_q = 0;
+
+sub usage {
+  my $progname = basename($0);
+  print STDERR "Usage: cat foo.fastx | $progname [options]\n";
+  print STDERR "-a - input is FASTA\n";
+  print STDERR "-h - print help\n";
+  print STDERR "-q - input is FASTQ\n";
+  print STDERR "-s - short output\n";
+  print STDERR "Either -a or -q is required\n";
+  exit(@_);
+}
+
+my $stat = getopts('ahqs');
+if (!$stat) {
+  usage(1);
+}
+if ($opt_h) {
+  usage();
+}
+if (scalar(@ARGV) != 0) {
+  usage(1);
+}
+
+if ( $opt_a + $opt_q != 1 ) {
+  usage(1);
+}
+
+# ------------------------------------------------------------------------
+
+my @lens;
+
+if ( $opt_q ) {
+
+  my $linenum=0;
+  while (<STDIN>) {
+    $linenum++;
+    if ($linenum == 2) {
+      chomp;
+      my $len = length($_);
+      push @lens, $len;
+    } elsif ($linenum == 4) {
+      $linenum = 0;
+    }
+  }
+
+} elsif ( $opt_a ) {
+  my $seq;
+  while (<STDIN>) {
+    chomp;
+    if (/>/) {
+      if (defined($seq)) {
+	push @lens, length($seq);
+	$seq = "";
+      }
+    } else {
+      $seq .= $_;
+    }
+  }
+  if (defined($seq)) {
+    push @lens, length($seq);
+  }
+} else {
+  die;
+}
+
+# ------------------------------------------------------------------------
+
+my $num_seqs = scalar(@lens);
+# ($num_seqs > 0) || die;
+
+@lens = sort { $b <=> $a} @lens;
+
+my $min_length = $lens[-1];
+my $max_length = $lens[0];
+
+# --------------------------------------------------
+
+my $median;
+my $j = POSIX::floor($num_seqs / 2);
+if ( $num_seqs % 2 == 1 ) {
+  # the "middle" value
+  $median = $lens[$j];
+} else {
+  # the mean of the "middle" two value
+  $median = ($lens[$j-1]+$lens[$j])/2;
+}
+
+# --------------------------------------------------
+
+my $num_bases = 0;
+foreach my $len ( @lens ) {
+  $num_bases += $len;
+}
+
+# --------------------------------------------------
+
+my $mean = ($num_bases*1.0)/$num_seqs;
+
+# --------------------------------------------------
+
+my $i=0;
+my $sum=0;
+while ($sum < $num_bases/2.0) {
+  $sum += $lens[$i];
+  $i++;
+}
+
+my $n50 = $lens[$i];
+my $l50 = $i+1;
+
+# --------------------------------------------------
+
+if ( !$opt_s ) {
+  printf("Number of seqs: %d\n",$num_seqs);
+  printf("Number of Bases: %d\n",$num_bases);
+  printf("Median: %d\n",$median);
+  printf("Mean: %.2f\n",$mean);
+  printf("N50: %d\n",$n50);
+  printf("L50: %d\n",$l50);
+  printf("Minimum: %d\n",$min_length);
+  printf("Maximum: %d\n",$max_length);
+} else {
+  printf("%d ",$num_seqs);
+  printf("%d ",$num_bases);
+  printf("%d ",$median);
+  printf("%.2f ",$mean);
+  printf("%d ",$n50);
+  printf("%d ",$l50);
+  printf("%d ",$min_length);
+  printf("%d\n",$max_length);
+}
