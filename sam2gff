@@ -155,6 +155,13 @@ sub fix_coordinates {
       $seq_width += 0;
       $ref_width += $width;
       $right_pos += $width;
+    } elsif ( $op eq "S" ) {
+      # S - soft clipping (clipped sequences present in SEQ)
+      #   assume last entry!
+      ($tmp_cigar eq "") || die "unexpected soft clipping: cigar=$cigar,";
+      $seq_width += 0;
+      $ref_width += $width;
+      $right_pos += 0;
     } elsif ( $op eq "N" ) {
       # N - skipped region from the reference
       $seq_width += 0;
