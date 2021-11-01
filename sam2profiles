@@ -1,0 +1,88 @@
+#! /bin/bash
+
+set -e
+set -o pipefail
+
+export LC_ALL=C
+
+opt_d=.
+
+_usage=
+
+_usage+="Usage: $0 [options] input.bam genome.fna tag \n"
+
+_usage+="-1 - single-end, no read2's\n"
+_usage+="-2 - paired paired-end (coverage includes between reads)\n"
+_usage+="-U - unpaired paired-end (coverage includes aligned based only)\n"
+_usage+="-a - \"fix\" RNAME/accession values\n"
+_usage+="-d DIR - write output to DIR [$opt_d]\n"
+_usage+="-e - skip empty profiles\n"
+_usage+="-h - this message\n"
+_usage+="-n - make naive profiles\n"
+_usage+="-r - aligned reads are anti-sense. Reverse the strand (and ends)\n"
+_usage+="-s - make sinister profiles\n"
+
+_usage+="\n"
+_usage+="Exactly one of -1, -2, or -U is required\n"
+
+
+function usage {
+    echo -e -n 1>&2 "$_usage"
+    exit "$@"
+}
+
+while getopts '12Uad:ehnrs' opt ; do
+    case "$opt" in
+
+	1) opt_1=1 ;;
+	2) opt_2=1 ;;
+	U) opt_U=1 ;;
+	a) opt_a=1 ;;
+	d) opt_d="$OPTARG" ;;
+	e) opt_e=1 ;;
+	h) opt_h=1 ;;
+	n) opt_n=1 ;;
+	r) opt_r=1 ;;
+	s) opt_s=1 ;;
+
+	\?) 
+	    echo 1>&2 "Invalid parameters"
+	    usage 1
+	    ;;
+	*) echo 1>&2 "Can't happen" ; exit 1 ;;
+    esac
+done
+shift $((OPTIND-1))
+
+if [ "$opt_h" ] ; then
+    usage
+elif [ "$opt_1""$opt_2""$opt_U" != 1 ] ; then
+    echo "Bad set of parameters"
+    usage 1
+elif [ -z "$3" -o -s "$4" ] ; then
+    echo "Invalid arguments"
+    usage 1
+fi
+
+BAM="$1"
+GENOME="$2"
+TAG="$3"
+
+SAM2GFF_ARGS=
+GFF2PROFILES=
+
+if [ "$opt_1" ] ; then SAM2GFF_ARGS+=" -s" ; fi
+if [ "$opt_2" ] ; then SAM2GFF_ARGS+=" -p" ; fi
+if [ "$opt_U" ] ; then SAM2GFF_ARGS+=" -u" ; fi
+if [ "$opt_a" ] ; then SAM2GFF_ARGS+=" -a" ; fi
+if [ "$opt_r" ] ; then SAM2GFF_ARGS+=" -r" ; fi
+
+if [ "$opt_e" ] ; then GFF2PROFILES_ARGS+=" -e" ; fi
+if [ "$opt_n" ] ; then GFF2PROFILES_ARGS+=" -n" ; fi
+if [ "$opt_s" ] ; then GFF2PROFILES_ARGS+=" -s" ; fi
+GFF2PROFILES_ARGS+=" -d $opt_d"
+
+samtools view -h "${BAM}" \
+    | ./scripts/sam2gff $SAM2GFF_ARGS \
+    | ./scripts/gff2profiles $GFF2PROFILES_ARGS \
+			     "${GENOME}" "${TAG}"
