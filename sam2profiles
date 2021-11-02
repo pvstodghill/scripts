@@ -1,88 +1,412 @@
-#! /bin/bash
+#! /usr/bin/env perl
 
-set -e
-set -o pipefail
+use strict;
+use warnings FATAL => 'all';
+use experimental 'postderef';
+#use Carp::Always;
 
-export LC_ALL=C
+use File::Basename;
 
-opt_d=.
+# use FindBin;
+# use lib "$FindBin::Bin";
+# use Xyzzy;
 
-_usage=
-
-_usage+="Usage: $0 [options] input.bam genome.fna tag \n"
-
-_usage+="-1 - single-end, no read2's\n"
-_usage+="-2 - paired paired-end (coverage includes between reads)\n"
-_usage+="-U - unpaired paired-end (coverage includes aligned based only)\n"
-_usage+="-a - \"fix\" RNAME/accession values\n"
-_usage+="-d DIR - write output to DIR [$opt_d]\n"
-_usage+="-e - skip empty profiles\n"
-_usage+="-h - this message\n"
-_usage+="-n - make naive profiles\n"
-_usage+="-r - aligned reads are anti-sense. Reverse the strand (and ends)\n"
-_usage+="-s - make sinister profiles\n"
-
-_usage+="\n"
-_usage+="Exactly one of -1, -2, or -U is required\n"
+use constant { TRUE => 1, FALSE => 0 };
 
 
-function usage {
-    echo -e -n 1>&2 "$_usage"
-    exit "$@"
+use constant {
+	      FLAG_PAIRED      => 0x01, # 1
+	      FLAG_PROPER_PAIR => 0x02, # 2
+	      FLAG_UNMAP       => 0x04, # 4
+	      FLAG_MUNMAP      => 0x08, # 8
+	      FLAG_REVERSE     => 0x10, # 16
+	      FLAG_MREVERSE    => 0x20, # 32
+	      FLAG_READ1       => 0x40, # 64
+	      FLAG_READ2       => 0x80, # 128
+	     };
+
+
+use Getopt::Std;
+
+our $opt_1 = 0;
+our $opt_2 = 0;
+our $opt_U = 0;
+our $opt_d = ".";
+our $opt_e;
+our $opt_h;
+our $opt_n = FALSE;
+our $opt_r = FALSE;
+our $opt_s = FALSE;
+our $opt_t;
+
+
+my $usage_str = "";
+my $progname = basename($0);
+
+$usage_str .= "Usage: $progname [options] [accesion1 accession2 ...]\n";
+$usage_str .= "\n";
+
+$usage_str .= "-1 - single-end, no read2's\n";
+$usage_str .= "-2 - paired paired-end (coverage includes between reads)\n";
+$usage_str .= "-U - unpaired paired-end (coverage includes aligned based only)\n";
+$usage_str .= "-d DIR - write output to DIR [$opt_d]\n";
+$usage_str .= "-e - skip empty profiles\n";
+$usage_str .= "-h - print help\n";
+$usage_str .= "-n - make naive profiles\n";
+$usage_str .= "-r - aligned reads are anti-sense. Reverse the strand (and ends)\n";
+$usage_str .= "-s - make sinister profiles\n";
+$usage_str .= "-t TAG - string to incorporate into profile file names.\n";
+
+$usage_str .= "\n";
+$usage_str .= "Exactly one of -1, -2, or -U is required.\n";
+$usage_str .= "Either -s or -n must be specified.\n";
+
+sub usage {
+  print STDERR $usage_str;
+  exit(@_);
 }
 
-while getopts '12Uad:ehnrs' opt ; do
-    case "$opt" in
+my $stat = getopts('12Ud:ehnrst:');
 
-	1) opt_1=1 ;;
-	2) opt_2=1 ;;
-	U) opt_U=1 ;;
-	a) opt_a=1 ;;
-	d) opt_d="$OPTARG" ;;
-	e) opt_e=1 ;;
-	h) opt_h=1 ;;
-	n) opt_n=1 ;;
-	r) opt_r=1 ;;
-	s) opt_s=1 ;;
+if (!$stat) {
+  usage(1);
+}
+if ($opt_h) {
+  usage();
+}
 
-	\?) 
-	    echo 1>&2 "Invalid parameters"
-	    usage 1
-	    ;;
-	*) echo 1>&2 "Can't happen" ; exit 1 ;;
-    esac
-done
-shift $((OPTIND-1))
+if ( $opt_1 + $opt_2 + $opt_U != 1 ) {
+  usage(1);
+}
 
-if [ "$opt_h" ] ; then
-    usage
-elif [ "$opt_1""$opt_2""$opt_U" != 1 ] ; then
-    echo "Bad set of parameters"
-    usage 1
-elif [ -z "$3" -o -s "$4" ] ; then
-    echo "Invalid arguments"
-    usage 1
-fi
+if (!$opt_s && !$opt_n) {
+  usage(1);
+}
 
-BAM="$1"
-GENOME="$2"
-TAG="$3"
+# ------------------------------------------------------------------------
 
-SAM2GFF_ARGS=
-GFF2PROFILES=
+my %contig_length;
+my %contig_empty;
 
-if [ "$opt_1" ] ; then SAM2GFF_ARGS+=" -s" ; fi
-if [ "$opt_2" ] ; then SAM2GFF_ARGS+=" -p" ; fi
-if [ "$opt_U" ] ; then SAM2GFF_ARGS+=" -u" ; fi
-if [ "$opt_a" ] ; then SAM2GFF_ARGS+=" -a" ; fi
-if [ "$opt_r" ] ; then SAM2GFF_ARGS+=" -r" ; fi
+my %sinister_plus;
+my %sinister_minus;
 
-if [ "$opt_e" ] ; then GFF2PROFILES_ARGS+=" -e" ; fi
-if [ "$opt_n" ] ; then GFF2PROFILES_ARGS+=" -n" ; fi
-if [ "$opt_s" ] ; then GFF2PROFILES_ARGS+=" -s" ; fi
-GFF2PROFILES_ARGS+=" -d $opt_d"
+my %naive_plus;
+my %naive_minus;
 
-samtools view -h "${BAM}" \
-    | ./scripts/sam2gff $SAM2GFF_ARGS \
-    | ./scripts/gff2profiles $GFF2PROFILES_ARGS \
-			     "${GENOME}" "${TAG}"
+sub process_at_line {
+  my ($line) = @_;
+  if ($line !~ /^\@SQ\t+(.*)/) {
+    return;
+  }
+  
+  my $accession;
+  my $length;
+  foreach my $attr (split(/\t/,$1)) {
+    if ( $attr =~ /SN:(.*)/ ) {
+      $accession = $1;
+    } elsif ( $attr =~ /LN:(.*)/ ) {
+      $length = $1;
+    }
+  }
+  (defined($accession)) || die;
+  (defined($length)) || die;
+  if ($#ARGV >= 0) {
+    my $found = 0;
+    foreach my $s (@ARGV) {
+      if (index($accession,$s) > -1) {
+	$found = 1;
+	last;
+      }
+    }
+    if (!$found) {
+      return;
+    }
+  }
+  $contig_length{$accession} = $length;
+  $contig_empty{$accession} = TRUE;
+
+  my $pp = [ ];
+  for (my $i=1; $i<=$length; $i++) {
+    push @$pp, 0;
+  }
+
+  my $nn = [ @$pp ];
+
+  if ( $opt_s && $opt_n ) {
+
+    $sinister_plus{$accession} = [ @$pp ];
+    $sinister_minus{$accession} = [ @$nn ];
+
+    $naive_plus{$accession} = $pp;
+    $naive_minus{$accession} = $nn;
+
+  } elsif ( $opt_s ) {
+
+    $sinister_plus{$accession} = $pp;
+    $sinister_minus{$accession} = $nn;
+
+  } elsif ( $opt_n ) {
+
+    $naive_plus{$accession} = $pp;
+    $naive_minus{$accession} = $nn;
+
+  } else {
+    die;
+  }
+}
+
+# ------------------------------------------------------------------------
+
+sub fix_coordinates {
+  my ($pos,$flag,$cigar) = @_;
+
+  if ( $flag & FLAG_UNMAP ) { return (); }
+
+  my $strand = ($flag & (FLAG_REVERSE)) ? "-" : "+";
+  
+  # $pos is leftmost mapping POSition of the first matching base.
+  my $left_pos = $pos;
+  # We have to compute the rightmost position
+  my $right_pos = $pos;
+
+  my $seq_width = 0;
+  my $ref_width = 0;
+  my $tmp_cigar = $cigar;
+  while ( $tmp_cigar =~ /^([0-9]+)([A-Z])(.*)/ ) {
+    my ($width,$op) = ($1,$2);
+    $tmp_cigar = $3;
+    if ( $op eq "M" ) {
+      # M - alignment match (can be a sequence match or mismatch) 
+      $seq_width += $width;
+      $ref_width += $width;
+      $right_pos += $width;
+    } elsif ( $op eq "I" ) {
+      # I - insertion to the reference
+      $seq_width += $width;
+      $ref_width += 0;
+      $right_pos += 0;
+    } elsif ( $op eq "D" ) {
+      # D - deletion from the reference
+      $seq_width += 0;
+      $ref_width += $width;
+      $right_pos += $width;
+    } elsif ( $op eq "S" ) {
+      # S - soft clipping (clipped sequences present in SEQ)
+      #   assume last entry!
+      ($tmp_cigar eq "") || die "unexpected soft clipping: cigar=$cigar,";
+      $seq_width += 0;
+      $ref_width += $width;
+      $right_pos += 0;
+    } elsif ( $op eq "N" ) {
+      # N - skipped region from the reference
+      $seq_width += 0;
+      $ref_width += $width;
+      $right_pos += $width;
+    } else {
+      die "cigar=$cigar,";
+    }
+  }
+  $right_pos--;
+
+  return ($left_pos,$right_pos,$strand);
+
+}
+
+# ------------------------------------------------------------------------
+
+my %unmatched;
+
+while (<STDIN>) {
+  chomp;
+  if (/^\@/) {
+    process_at_line($_);
+    next;
+  }
+
+  my ($qname,$flag,$rname,$pos,$mapq,$cigar,$rnext,$pnext,$tlen,$seq)
+    = split(/\t/);
+
+  if ( $opt_2 && !($flag & FLAG_PROPER_PAIR) ) {
+    next;
+  }
+
+  my ($begin,$end,$strand) = fix_coordinates($pos,$flag,$cigar);
+  if (!defined($begin)) {
+    next;
+  }
+
+  my $accession = $rname;
+
+  my $read;
+  if ( $flag & FLAG_PAIRED ) {
+    if ($opt_1) {
+      print STDERR "Paired read found when -s is set.\n";
+      usage(1);
+    }
+    if ( $flag & FLAG_READ1 ) {
+      $read = 1;
+    } elsif ( $flag & FLAG_READ2 ) {
+      $read = 2;
+    } else {
+      die;
+    }
+  } else {
+    if ($opt_2) {
+      print STDERR "Unpaired read found when -p is set.\n";
+      usage(1);
+    }
+  }
+
+  if ( $opt_1 ) {
+    ;
+  } elsif ( $opt_U ) {
+    # each mapped read is treated as single-ended
+    ;
+  } else {
+
+    $opt_2 || die;
+
+    if (!defined($unmatched{$qname})) {
+      # properly-paired, but unmatched (yet). cache it for later.
+      $unmatched{$qname} = [ $read, $accession, $begin, $end, $strand ];
+      next;
+    }
+
+    my $other_read;
+    my ($accession1, $begin1, $end1, $strand1);
+    my ($accession2, $begin2, $end2, $strand2);
+    if ($read == 1) {
+      ($accession1, $begin1, $end1, $strand1) = ($accession, $begin, $end, $strand);
+      ($other_read, $accession2, $begin2, $end2, $strand2) = $unmatched{$qname}->@*;
+    } elsif ($read == 2) {
+      ($other_read, $accession1, $begin1, $end1, $strand1) = $unmatched{$qname}->@*;
+      ($accession2, $begin2, $end2, $strand2) = ($accession, $begin, $end, $strand);
+    } else {
+      die;
+    }
+
+    delete $unmatched{$qname};
+
+    ( $read + $other_read == 3 ) || die;
+
+    ( $accession1 eq $accession2 ) || die;
+
+    ( $strand1 ne $strand2 ) || die;
+    $strand = $strand1;
+    
+    if ( $strand1 eq "+" ) {
+      ($begin,$end) = ($begin1,$end2);
+    } elsif ( $strand1 eq "-" ) {
+      ($begin,$end) = ($begin2,$end1);
+    } else {
+      die;
+    }
+  }
+
+  ($begin <= $end) || die "begin=$begin, end=$end,";
+  if ( $opt_r ) {
+    $strand = ( $strand eq "+" ) ? "-" : "+";
+  }
+
+  if (!defined($contig_length{$accession})) {
+    next;
+  }
+  $contig_empty{$accession} = FALSE;
+
+  if ($opt_s) {
+    if ($strand eq "-") {
+      $sinister_minus{$accession}->[$end-1]++;
+    } else {
+      $sinister_plus{$accession}->[$begin-1]++;
+    }
+  }
+
+  if ($opt_n) {
+    my $a = ($strand eq "-") ? $naive_minus{$accession} : $naive_plus{$accession};
+    my $l = scalar(@$a);
+    # fixme: handle wrap-around
+    (1 <= $begin && $begin <= $l) || die "accession=$accession, begin=$begin, end=$end, l=$l,";
+    (1 <= $end && $end <= $l) || die "accession=$accession, begin=$begin, end=$end, l=$l,";
+    for (my $i=$begin-1; $i<$end; $i++) {
+      $a->[$i]++;
+    }
+  }
+
+}
+
+# ------------------------------------------------------------------------
+
+my $num_unmatched = scalar(keys(%unmatched));
+if ( $num_unmatched > 0 ) {
+  print STDERR "### $num_unmatched unexpected unmatched read(s)s. E.g., ";
+  foreach my $qname (keys(%unmatched)) {
+    print STDERR $qname;
+    last;
+  }
+  print STDERR "\n";
+}
+
+# ------------------------------------------------------------------------
+
+sub fix_accession {
+  my ($accession) = @_;
+
+  if ($accession =~ /\|/) {
+    my @l = split(/\|/, $accession);
+    if (defined($l[0]) && $l[0] eq "gi") {
+      my $s = $l[3];
+      $s =~ s/\.[0-9]$//;
+      return $s;
+    } elsif (defined($l[0]) && $l[0] eq "lcl") {
+      return $l[1];
+    } else {
+      die "fix_accession(\"$accession\"),";
+    }
+  } elsif ($accession =~ / /) {
+    my @l = split(/ /, $accession);
+    if (defined($l[0])) {
+      return $l[0];
+    }
+  } else {
+    #die "fix_accession(\"$accession\"),";
+    $accession =~ s/\.[0-9]$//;
+    return $accession;
+  }
+}
+
+sub write_profile {
+  my ($accession,$type,$p,$m) = @_;
+  defined($p) || die;
+  defined($m) || die;
+  my $tag = defined($opt_t) ? "_".$opt_t : "";
+  my $out_filename = ($opt_d."/".fix_accession($accession).$tag.".".$type.".profile");
+  open(my $fh,">", $out_filename) || die;
+  my $l = scalar(@$p);
+  for (my $i=0; $i<$l; $i++) {
+    print $fh ${$p}[$i]," ",${$m}[$i],"\n";
+  }
+  close $fh;
+}
+
+foreach my $accession (keys %contig_length) {
+
+  if ($contig_empty{$accession} && $opt_e) {
+    next;
+  }
+
+  if ($opt_s) {
+    write_profile($accession,"sinister",
+		  $sinister_plus{$accession},
+		  $sinister_minus{$accession});
+  }
+  if ($opt_n) {
+    write_profile($accession,"naive",
+		  $naive_plus{$accession},
+		  $naive_minus{$accession});
+  }
+}
+
+# ------------------------------------------------------------------------
+# Done.
+# ------------------------------------------------------------------------
