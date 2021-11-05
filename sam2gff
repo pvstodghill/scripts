@@ -1,0 +1,323 @@
+#! /usr/bin/env perl
+
+use strict;
+use warnings FATAL => 'all';
+use experimental 'postderef';
+#use Carp::Always;
+
+# use FindBin;
+# use lib "$FindBin::Bin";
+# use Xyzzy;
+
+use constant { TRUE => 1, FALSE => 0 };
+
+
+use constant {
+	      FLAG_PAIRED      => 0x01, # 1
+	      FLAG_PROPER_PAIR => 0x02, # 2
+	      FLAG_UNMAP       => 0x04, # 4
+	      FLAG_MUNMAP      => 0x08, # 8
+	      FLAG_REVERSE     => 0x10, # 16
+	      FLAG_MREVERSE    => 0x20, # 32
+	      FLAG_READ1       => 0x40, # 64
+	      FLAG_READ2       => 0x80, # 128
+	     };
+
+
+use Getopt::Std;
+
+our $opt_a;
+our $opt_f = "misc_feature";
+our $opt_h;
+our $opt_p = 0;
+our $opt_r = FALSE;
+our $opt_s = 0;
+our $opt_u = 0;
+
+sub usage {
+  print STDERR "Usage: $0 [options]\n";
+
+  print STDERR "-a - \"fix\" RNAME/accession values\n";
+  print STDERR "-f STR - use STR as feature type [$opt_f]\n";
+  print STDERR "-h - print help\n";
+  print STDERR "-p - paired paired-end (coverage includes between reads)\n";
+  print STDERR "-r - aligned reads are anti-sense. Reverse the strand (and ends)\n";
+  print STDERR "-s - single-end, no read2's\n";
+  print STDERR "-u - unpaired paired-end (coverage includes aligned based only)\n";
+
+  print STDERR "Exactly one of -p, -u, or -s is required\n";
+  exit(@_);
+}
+
+my $stat = getopts('af:hprsu');
+if (!$stat) {
+  usage(1);
+}
+if ($opt_h) {
+  usage();
+}
+
+if ( $opt_p + $opt_s + $opt_u != 1 ) {
+  usage(1);
+}
+
+my %contig_length;
+
+sub process_at_line {
+  my ($line) = @_;
+
+  if ($line =~ /^\@SQ\t+(.*)/) {
+    my $accession;
+    my $length;
+    foreach my $attr (split(/\t/,$1)) {
+      if ( $attr =~ /SN:(.*)/ ) {
+	$accession = $1;
+      } elsif ( $attr =~ /LN:(.*)/ ) {
+	$length = $1;
+      }
+    }
+    (defined($accession)) || die;
+    (defined($length)) || die;
+    if ($#ARGV >= 0) {
+      my $found = 0;
+      foreach my $s (@ARGV) {
+	if (index($accession,$s) > -1) {
+	  $found = 1;
+	  last;
+	}
+      }
+      if (!$found) {
+	next;
+      }
+    }
+    $contig_length{$accession} = $length;
+  }
+
+}
+
+sub fix_accession {
+  my ($accession) = @_;
+
+  if (!$opt_a) { return $accession; }
+
+  if ($accession =~ /\|/) {
+    my @l = split(/\|/, $accession);
+    if (defined($l[0]) && $l[0] eq "gi") {
+      my $s = $l[3];
+      $s =~ s/\.[0-9]$//;
+      return $s;
+    } else {
+      die "fix_accession(\"$accession\"),";
+    }
+  } elsif ($accession =~ / /) {
+    my @l = split(/ /, $accession);
+    if (defined($l[0])) {
+      return $l[0];
+    }
+  } else {
+    #die "fix_accession(\"$accession\"),";
+    $accession =~ s/\.[0-9]$//;
+    return $accession;
+  }
+}
+
+
+sub fix_coordinates {
+  my ($pos,$flag,$cigar) = @_;
+
+  if ( $flag & FLAG_UNMAP ) { return (); }
+
+  my $strand = ($flag & (FLAG_REVERSE)) ? "-" : "+";
+  
+  # $pos is leftmost mapping POSition of the first matching base.
+  my $left_pos = $pos;
+  # We have to compute the rightmost position
+  my $right_pos = $pos;
+
+  my $seq_width = 0;
+  my $ref_width = 0;
+  my $tmp_cigar = $cigar;
+  while ( $tmp_cigar =~ /^([0-9]+)([A-Z])(.*)/ ) {
+    my ($width,$op) = ($1,$2);
+    $tmp_cigar = $3;
+    if ( $op eq "M" ) {
+      # M - alignment match (can be a sequence match or mismatch) 
+      $seq_width += $width;
+      $ref_width += $width;
+      $right_pos += $width;
+    } elsif ( $op eq "I" ) {
+      # I - insertion to the reference
+      $seq_width += $width;
+      $ref_width += 0;
+      $right_pos += 0;
+    } elsif ( $op eq "D" ) {
+      # D - deletion from the reference
+      $seq_width += 0;
+      $ref_width += $width;
+      $right_pos += $width;
+    } elsif ( $op eq "S" ) {
+      # S - soft clipping (clipped sequences present in SEQ)
+      #   assume last entry!
+      ($tmp_cigar eq "") || die "unexpected soft clipping: cigar=$cigar,";
+      $seq_width += 0;
+      $ref_width += $width;
+      $right_pos += 0;
+    } elsif ( $op eq "N" ) {
+      # N - skipped region from the reference
+      $seq_width += 0;
+      $ref_width += $width;
+      $right_pos += $width;
+    } else {
+      die "cigar=$cigar,";
+    }
+  }
+  $right_pos--;
+
+  return ($left_pos,$right_pos,$strand);
+
+}
+
+# ------------------------------------------------------------------------
+
+my %unmatched;
+
+use constant { NO_VALUE => ";no-value;" };
+
+sub unparse_gff_attributes {
+  my ($attributes) = @_;
+  my @l;
+  foreach my $key (sort (keys %$attributes) ) {
+    my $val = $attributes->{$key};
+    if ( $val eq NO_VALUE ) {
+      push @l, $key;
+    } else {
+      push @l, $key."=".$val;
+    }
+  }
+  return join(";",@l);
+}
+
+
+sub quote {
+  my ($val) = @_;
+  $val =~ s/\"/\\\"/g;
+  return '"'.$val.'"';
+}
+
+use File::Basename;
+
+my $source = basename($0);
+my $feature = $opt_f;
+my $score = "."; # fixme;
+my $frame = ".";
+
+
+while (<STDIN>) {
+  chomp;
+  if (/^\@/) {
+    process_at_line($_);
+    next;
+  }
+
+  my ($qname,$flag,$rname,$pos,$mapq,$cigar,$rnext,$pnext,$tlen,$seq)
+    = split(/\t/);
+
+  if ( $opt_p && !($flag & FLAG_PROPER_PAIR) ) {
+    next;
+  }
+
+  my ($begin,$end,$strand) = fix_coordinates($pos,$flag,$cigar);
+  if (!defined($begin)) {
+    next;
+  }
+
+  my $accession = fix_accession($rname);
+
+  my $read;
+  if ( $flag & FLAG_PAIRED ) {
+    if ($opt_s) {
+      print STDERR "Paired read found when -s is set.\n";
+      usage(1);
+    }
+    if ( $flag & FLAG_READ1 ) {
+      $read = 1;
+    } elsif ( $flag & FLAG_READ2 ) {
+      $read = 2;
+    } else {
+      die;
+    }
+  } else {
+    if ($opt_p) {
+      print STDERR "Unpaired read found when -p is set.\n";
+      usage(1);
+    }
+  }
+
+  my $attributes = { qname => quote($qname) };
+
+  if ( $opt_s ) {
+    if (defined($read)) {
+      $attributes->{read} = $read;
+    }
+  } elsif ( $opt_u ) {
+    # each mapped read is treated as single-ended
+    $attributes->{read} = $read;
+  } else {
+
+    $opt_p || die;
+
+    if (!defined($unmatched{$qname})) {
+      # properly-paired, but unmatched (yet). cache it for later.
+      $unmatched{$qname} = [ $read, $accession, $begin, $end, $strand ];
+      next;
+    }
+
+    my $other_read;
+    my ($accession1, $begin1, $end1, $strand1);
+    my ($accession2, $begin2, $end2, $strand2);
+    if ($read == 1) {
+      ($accession1, $begin1, $end1, $strand1) = ($accession, $begin, $end, $strand);
+      ($other_read, $accession2, $begin2, $end2, $strand2) = $unmatched{$qname}->@*;
+    } elsif ($read == 2) {
+      ($other_read, $accession1, $begin1, $end1, $strand1) = $unmatched{$qname}->@*;
+      ($accession2, $begin2, $end2, $strand2) = ($accession, $begin, $end, $strand);
+    } else {
+      die;
+    }
+
+    delete $unmatched{$qname};
+
+    ( $read + $other_read == 3 ) || die;
+
+    ( $accession1 eq $accession2 ) || die;
+
+    ( $strand1 ne $strand2 ) || die;
+    $strand = $strand1;
+    
+    if ( $strand1 eq "+" ) {
+      ($begin,$end) = ($begin1,$end2);
+    } elsif ( $strand1 eq "-" ) {
+      ($begin,$end) = ($begin2,$end1);
+    } else {
+      die;
+    }
+  }
+
+  ($begin <= $end) || die "begin=$begin, end=$end,";
+  if ( $opt_r ) { $strand = ( $strand eq "+" ) ? "-" : "+"; }
+  print join("\t",$accession,$source,$feature,$begin,$end,
+	     $score,$strand,$frame,unparse_gff_attributes($attributes)),"\n";
+}
+
+# ------------------------------------------------------------------------
+
+my $num_unmatched = scalar(keys(%unmatched));
+if ( $num_unmatched > 0 ) {
+  print STDERR "### $num_unmatched unexpected unmatched read(s)s. E.g., ";
+  foreach my $qname (keys(%unmatched)) {
+    print STDERR $qname;
+    last;
+  }
+  print STDERR "\n";
+}
+
