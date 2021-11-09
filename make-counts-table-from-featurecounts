@@ -96,7 +96,7 @@ while (<$regions_fh>) {
       }
       $locus_tag2 .= "/" . $old_locus_tag;
     }
-    my $gene_name = $attributes->{name};
+    my $gene_name = $attributes->{gene};
     if (defined($locus_tag) && defined($gene_name)) {
       if ($locus_tag eq $gene_name) {
 	$name = $locus_tag2;
@@ -111,6 +111,7 @@ while (<$regions_fh>) {
   }
   my $str = "$accession:$start..$end/$strand";
   if ( defined($name) ) {
+    $name =~ s/ /_/g;
     $str .= "($name)";
   }
 
