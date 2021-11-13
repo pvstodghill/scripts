@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+set -e
+set -x
+
 # Script written by Ryan Wick <rrwick@gmail.com>
 # Taken from https://github.com/rrwick/Minipolish/blob/main/miniasm_and_minipolish.sh
 # License under GPLv3

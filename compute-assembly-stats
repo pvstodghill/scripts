@@ -15,16 +15,14 @@ function usage {
     echo 1>&2 "-p - long reads are PacBio (not Nanopore)"
     echo 1>&2 "-s - short (2 lines: header + results) output"
     echo 1>&2 "-t N - use N threads [all]"
-    echo 1>&2 "-f PACKAGES.yaml - use \"howto\" and PACKAGES.yaml"
     exit "$@"
 }    
 
-while getopts 'S:Hf:hkpqst:' opt ; do
+while getopts 'S:Hhkpqst:' opt ; do
     case "$opt" in
 
 	H) opt_H=1 ;;
 	S) opt_S="$OPTARG" ;;
-	f) opt_f="$OPTARG" ;;
 	h) opt_h=1 ;;
 	k) opt_k=1 ;;
 	p) opt_p=1 ;;
@@ -49,10 +47,6 @@ else
 fi
 
 DIR=$(mktemp -p . -d)
-
-if [ "$opt_f" ] ; then
-    HOWTO="${SCRIPTS}/howto -q -T $DIR -f $opt_f"
-fi
 
 if [ -z "$6" -o "$9" ] ; then
     usage 1
@@ -85,7 +79,7 @@ function log {
 function safe_cat {
     for f in "$@" ; do
 	case "$f" in
-	    *.gz) gzcat "$f" ;;
+	    *.gz) gzip -dc "$f" ;;
 	    *) cat "$f"
 	esac
     done
@@ -144,15 +138,15 @@ if [ "$TRIMMED_LONG_FQ" ] ; then
 	LONG_MODEL=map-pb
     fi
 
-    ${HOWTO} minimap2 -t ${THREADS} -a -x $LONG_MODEL \
+    minimap2 -t ${THREADS} -a -x $LONG_MODEL \
              ${FINAL_FNA} ${TRIMMED_LONG_FQ} \
 	     2>/dev/null \
-        | ${HOWTO} samtools view -h -F 0x900 \
-	| ${HOWTO} samtools sort -@ ${THREADS} 2>/dev/null \
+        | samtools view -h -F 0x900 \
+	| samtools sort -@ ${THREADS} 2>/dev/null \
 		   > $DIR/long.sam
     
     NUM_LONG_ALIGNED=$(
-	${HOWTO} samtools depth $DIR/long.sam \
+	samtools depth $DIR/long.sam \
 	    | cut -f3 \
 	    | gawk 'BEGIN {x=0} {x+=$1} END {print x}'
 		    )
@@ -165,16 +159,16 @@ fi
 log "Computing aligned Illumina bases"
 
 safe_cat $FINAL_FNA > $DIR/final.fna
-${HOWTO} bowtie2-build -q $DIR/final.fna $DIR/final.fna
-${HOWTO} bowtie2 --threads ${THREADS} --quiet \
+bowtie2-build -q $DIR/final.fna $DIR/final.fna
+bowtie2 --threads ${THREADS} --quiet \
 	-x $DIR/final.fna \
 	-1 $TRIMMED_R1_FQ -2 $TRIMMED_R2_FQ \
-    | ${HOWTO} samtools view -h -F 0x900 \
-    | ${HOWTO} samtools sort -@ ${THREADS} 2>/dev/null \
+    | samtools view -h -F 0x900 \
+    | samtools sort -@ ${THREADS} 2>/dev/null \
 	       > $DIR/illumina.sam
 
 NUM_ILLUMINA_ALIGNED=$(
-    ${HOWTO} samtools depth $DIR/illumina.sam \
+    samtools depth $DIR/illumina.sam \
 	| cut -f3 \
 	| gawk 'BEGIN {x=0} {x+=$1} END {print x}'
 		    )
