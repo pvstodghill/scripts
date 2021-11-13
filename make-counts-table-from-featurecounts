@@ -84,39 +84,8 @@ while (<$regions_fh>) {
   my $idattr = $attributes->{$id_arg};
   if (!defined($idattr)) { die "<<$_>>,"; }
   push @all_idattrs, $idattr;
-  # --------------------------------------------------
-  my $name;
-  {
-    my $locus_tag = $attributes->{locus_tag};
-    my $old_locus_tag = $attributes->{old_locus_tag};
-    my $locus_tag2 = $locus_tag;
-    if (defined($old_locus_tag)) {
-      if ($old_locus_tag =~ /%2C(.*)/) {
-	$old_locus_tag = $1;
-      }
-      $locus_tag2 .= "/" . $old_locus_tag;
-    }
-    my $gene_name = $attributes->{name};
-    if (defined($locus_tag) && defined($gene_name)) {
-      if ($locus_tag eq $gene_name) {
-	$name = $locus_tag2;
-      } else {
-	$name = join("/",$locus_tag2,$gene_name);
-      }
-    } elsif (defined($locus_tag)) {
-      $name = $locus_tag2;
-    } elsif (defined($gene_name)) {
-      $name = $gene_name;
-    }
-  }
-  my $str = "$accession:$start..$end/$strand";
-  if ( defined($name) ) {
-    $str .= "($name)";
-  }
-
-  # --------------------------------------------------
   (!defined($idattr_row{$idattr})) || die "idattr=<<$idattr>>,";
-  $idattr_row{$idattr} = { "" => $str };
+  $idattr_row{$idattr} = { "" => $idattr };
 }
 close($regions_fh);
 

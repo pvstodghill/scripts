@@ -1,0 +1,328 @@
+#! /usr/bin/env perl
+
+use strict;
+use warnings;
+#use Carp::Always;
+use Getopt::Std;
+
+use constant { TRUE => 1, FALSE => 0 };
+
+# ------------------------------------------------------------------------
+
+my $feature_arg = "gene"; # fixme: should be parameter
+my $id_arg = "gene_id"; # fixme: should be parameter
+
+# ------------------------------------------------------------------------
+# Command line processing
+# ------------------------------------------------------------------------
+
+my $options_specs = "";
+my $options_descr = "";
+
+sub notice_option {
+  my ($spec,$descr) = @_;
+  $options_specs .= $spec;
+  $options_descr .= $descr . "\n";
+}
+
+our $opt_c = 2.0; notice_option("c:", "-c CUTOFF - cutoff for colors [$opt_c]");
+our $opt_g = 0; notice_option("g", "-h - generate GFF");
+our $opt_h = 0; notice_option("h", "-h - print this message");
+our $opt_n = 0; notice_option("n", "-n - suppress notes field");
+our $opt_p = -1; notice_option("p:", "-p VAL - include only p-value<=VAL [$opt_p]");
+our $opt_q = -1; notice_option("q:", "-q VAL - include only q-value<=VAL [$opt_q]");
+our $opt_t = 0; notice_option("t", "-t - generate table (TSV)");
+
+$options_descr .= "\n";
+
+if (!getopts($options_specs)) {
+  usage(1);
+}
+
+sub usage {
+  print STDERR "Usage: $0 [options] REGIONS.gtf [ALIASES.txt] < raw_results.txt\n";
+  print $options_descr;
+  print STDERR "one of -g or -t is required.\n";
+  exit(@_);
+}
+
+if ($opt_h) {
+  usage();
+}
+
+if ( $opt_g == $opt_t ) {
+  usage(1);
+}
+
+if (scalar(@ARGV) < 1 || 2 < scalar(@ARGV)) {
+  usage(1);
+}
+
+my ($regions_fn,$aliases_fn) = @ARGV;
+
+# ------------------------------------------------------------------------
+# Read the regions. Store only the gene_id's
+# ------------------------------------------------------------------------
+
+my %accession_of;
+my %start_of;
+my %end_of;
+my %strand_of;
+my %old_locus_tag_of;
+my %gene_name_of;
+
+use constant { NO_VALUE => ";no-value;" };
+
+sub parse_gtf_attributes {
+  my ($raw_attributes) = @_;
+  my $attributes = {};
+  foreach my $key_val (split(/; */,$raw_attributes)) {
+    my ($key,$val);
+    if ( $key_val =~ /^([^ ]+) (.*)/ ) {
+      ($key,$val) = ($1,$2);
+      $val =~ s/^"//;
+      $val =~ s/"$//;
+    } else {
+      ($key,$val) = ($key_val, NO_VALUE);
+    }
+    $attributes->{$key} = $val;
+  }
+  return $attributes;
+}
+
+open(my $regions_fh,"<",$regions_fn) || die "Cannot open: <<$regions_fn>>,";
+while (<$regions_fh>) {
+  chomp;
+  if ( /^#/ || /^$/ ) {
+    next;
+  }
+  my ($accession,$source,$feature,$start,$end,
+      $score,$strand,$frame,$raw_attributes) = split(/\t/,$_);
+  if ($feature ne $feature_arg) {
+    next;
+  }
+  my $attributes = parse_gtf_attributes($raw_attributes);
+  my $idattr = $attributes->{$id_arg};
+  if (!defined($idattr)) {
+    die "<<$_>>,";
+  }
+  if (defined($accession_of{$idattr})) {
+    die "idattr=<<$idattr>>,";
+  }
+
+  $accession_of{$idattr} = $accession;
+  $start_of{$idattr} = $start;
+  $end_of{$idattr} = $end;
+  $strand_of{$idattr} = $strand;
+  if ($idattr ne $attributes->{locus_tag}) {
+    die "idattr=<<$idattr>>, locus_tag=<<$attributes->{locus_tag}>>",
+  }
+  $old_locus_tag_of{$idattr} = $attributes->{old_locus_tag};
+  $gene_name_of{$idattr} = $attributes->{gene};
+
+}
+close($regions_fh);
+
+# ------------------------------------------------------------------------
+# Read the aliases
+# ------------------------------------------------------------------------
+
+my %alias_of;
+
+if ( defined($aliases_fn) ) {
+
+  open(my $fn, "<", $aliases_fn) || die "Cannot open <<$aliases_fn>>,";
+  while (<$fn>) {
+    chomp;
+    my ($idattr,$alias) = split(/\t/);
+    $alias_of{$idattr} = $alias;
+  }
+  close $fn;
+}
+
+# ------------------------------------------------------------------------
+# Read DESeq2 results; generate TSV table
+# ------------------------------------------------------------------------
+
+if ( $opt_t ) {
+  
+  while (<STDIN>) {
+    chomp;
+    my @F = split(/\t/);
+    if ( $. == 1 ) {
+      for (my $i=0; $i<=$#F; $i++) {
+	$F[$i] =~ s/^\"//;
+	$F[$i] =~ s/\"$//;
+      }
+      if ($F[0] eq "baseMean") {
+	unshift @F, "Row.names";
+      }
+      if ($F[0] eq "Row.names" ) {
+	shift @F;
+	@F = ("start","end","strand","names", @F);
+      }
+    } else {
+      my $idattr = shift @F;
+      $idattr =~ s/"//g;
+      my $accession = $accession_of{$idattr};
+      (defined($accession)) || die "idattr=<<$idattr>>,";
+      my $start = $start_of{$idattr};
+      my $end = $end_of{$idattr};
+      my $strand = $strand_of{$idattr};
+      my %names;
+      $names{$old_locus_tag_of{$idattr}} = TRUE if (defined($old_locus_tag_of{$idattr}));
+      $names{$gene_name_of{$idattr}} = TRUE if (defined($gene_name_of{$idattr}));
+      $names{$alias_of{$idattr}} = TRUE if (defined($alias_of{$idattr}));
+      my $names = join(",", sort {$a cmp $b} (keys %names));
+
+      @F = ($accession,$start,$end,$strand,$idattr,$names, @F);
+    }
+    print join("\t",@F),"\n";
+  }
+
+  exit;
+}
+
+# ------------------------------------------------------------------------
+# Read DESeq2 results; generate GFF
+# ------------------------------------------------------------------------
+
+sub log2 {
+  my $n = shift;
+  return log($n)/log(2);
+}
+
+
+if ( $opt_g ) {
+
+  my $source;
+  my $feature = "misc_difference";
+  my $frame = ".";
+
+  my $version;
+
+  while (<STDIN>) {
+    chomp;
+    my @fields = split("\t");
+    if ( $fields[0] eq '"id"' || $fields[0] eq 'id' ) {
+      $version = 1;
+      $source = "DESeq";
+      next;
+    } elsif ( $fields[0] eq '"baseMean"' || $fields[0] eq 'baseMean' ) {
+      $version = 2;
+      $source = "DESeq2";
+      next;
+    }
+    (defined($version)) || die "Cannot determine version of DESeq";
+
+    my ($num, $idattr, $baseMean, $baseMeanA, $baseMeanB, $foldChange,
+	$log2FoldChange, $pval, $padj,$lfcSE, $stat );
+    if ( $version == 1 ) {
+      ($num, $idattr, $baseMean, $baseMeanA, $baseMeanB, $foldChange,
+       $log2FoldChange, $pval, $padj, ) = @fields;
+    } elsif ( $version == 2 ) {
+      ($idattr, $baseMean, $log2FoldChange, $lfcSE, $stat, $pval, $padj)
+	= @fields;
+      if ( $log2FoldChange eq "NA" ) {
+	$foldChange = "NA";
+      } else {
+	$foldChange = 2**$log2FoldChange;
+      }
+    } else {
+      die;
+    }
+
+      $idattr =~ s/"//g;
+
+    if ( $idattr eq "NA" ) {
+      next;
+    }
+    if ( $opt_p >= 0 && ( $pval eq "NA" || $pval > $opt_p ) ) {
+      next;
+    }
+    if ( $opt_q >= 0 && ( $padj eq "NA" || $padj > $opt_q ) ) {
+      next;
+    }
+
+      my $accession = $accession_of{$idattr};
+      (defined($accession)) || die "idattr=<<$idattr>>,";
+      my $start = $start_of{$idattr};
+      my $end = $end_of{$idattr};
+      my $strand = $strand_of{$idattr};
+      my %names;
+      $names{$old_locus_tag_of{$idattr}} = TRUE if (defined($old_locus_tag_of{$idattr}));
+      $names{$gene_name_of{$idattr}} = TRUE if (defined($gene_name_of{$idattr}));
+      $names{$alias_of{$idattr}} = TRUE if (defined($alias_of{$idattr}));
+    my $names = join(",", sort {$a cmp $b} (keys %names));
+
+    my $score = $padj;
+    my $colour;
+    if ( $log2FoldChange eq "NA" ) {
+      $colour = 14		# black
+    } elsif ( $log2FoldChange eq "Inf" || $opt_c <= $foldChange ) {
+      $colour = 3;		# green
+    } elsif ( $log2FoldChange eq "-Inf" || $foldChange <= 1/$opt_c  ) {
+      $colour = 2;		# red
+    } else {
+      $colour = 13;		# gray
+    }
+
+    my @attributes = ();
+    my @notes = ();
+
+    if ( defined($names) ) {
+      push @attributes, "names \"$names\"";
+    }
+
+    push @attributes, "colour $colour";
+
+    push @attributes, "baseMean $baseMean";
+
+    if (defined($baseMeanA)) {
+      push @attributes, "baseMeanA $baseMeanA";
+    }
+    if (defined($baseMeanB)) {
+      push @attributes, "baseMeanB $baseMeanB";
+    }
+    if (defined($foldChange)) {
+      push @attributes, "foldChange $foldChange";
+      push @notes, "foldChange ".(($foldChange eq "NA") ? $foldChange : sprintf("%.4g", $foldChange));
+    }
+
+    push @attributes, "log2FoldChange $log2FoldChange";
+
+    if (defined($lfcSE)) {
+      push @attributes, "lfcSE $lfcSE";
+    }
+    if (defined($stat)) {
+      push @attributes, "stat $stat";
+    }
+
+    push @attributes, "pval $pval";
+    push @notes, "pval ".(($pval eq "NA") ? $pval : sprintf("%.4g", $pval));
+
+    push @attributes, "padj $padj";
+    push @notes, "padj ".(($padj eq "NA") ? $padj : sprintf("%.4g", $padj));
+    if ( !$opt_n ) {
+      unshift @attributes, sprintf("note \"%s\"", join(", ", @notes));
+    }
+
+    my $attributes = join("; ",@attributes);
+    print join("\t",$accession,$source,$feature,$start,$end,$score,
+	       $strand,$frame,$attributes),"\n";
+  }
+
+  exit;
+
+}
+
+# ------------------------------------------------------------------------
+# Anything else is an error.
+# ------------------------------------------------------------------------
+
+die;
+
+# ------------------------------------------------------------------------
+# Done.
+# ------------------------------------------------------------------------
+
