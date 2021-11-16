@@ -15,14 +15,12 @@ fi
 function usage {
     echo 1>&2 "Usage: $0 [options] genome.fna"
     echo 1>&2 "-h - this message"
-    echo 1>&2 "-p PACKAGES.yaml"
     exit "$@"
 }    
 
-while getopts 'hp:' opt ; do
+while getopts 'h' opt ; do
     case "$opt" in
 	h) opt_h=1 ;;
-	p) opt_p="$OPTARG" ;;
 	\?) usage 1 ;;
 	*) echo 1>&2 "Can't happen" ; exit 1 ;;
     esac
@@ -42,12 +40,6 @@ mkdir -p $REFSEEK/temp/tmp
 
 cp "$1" $REFSEEK/temp/genome.fasta
 
-HOWTO="howto -q -T temp/tmp"
-if [ "$opt_p" ] ; then
-    cp $opt_p $REFSEEK/temp/packages.yaml
-    # HOWTO+=" -p temp/packages.yaml"
-fi
-
 echo "${PS4}cd $REFSEEK"
 cd $REFSEEK
 
@@ -55,11 +47,11 @@ cd $REFSEEK
 echo 1>&2 '### Refseq'
 (
     set -x
-    ${HOWTO} referenceseeker ./bacteria-refseq ./temp/genome.fasta
+    referenceseeker ./bacteria-refseq ./temp/genome.fasta
 )
 echo 1>&2 '### GTDB'
 (
     set -x
-    ${HOWTO} referenceseeker ./bacteria-gtdb ./temp/genome.fasta
+    referenceseeker ./bacteria-gtdb ./temp/genome.fasta
 )
 
