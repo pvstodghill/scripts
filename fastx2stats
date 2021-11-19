@@ -129,8 +129,17 @@ while ($sum < $num_bases/2.0) {
   $i++;
 }
 
-my $n50 = $lens[$i];
-my $l50 = $i+1;
+my $n50;
+my $l50;
+
+if ($i == scalar(@lens)) {
+  ($i == 1) || die "how else does it happen?,";
+  $n50 = $l50 = "undef";
+} else {
+  $n50 = sprintf("%d",$lens[$i]);
+  $l50 = sprintf("%d",$i+1);
+}
+
 
 # --------------------------------------------------
 
@@ -139,8 +148,8 @@ if ( !$opt_s ) {
   printf("Number of Bases: %d\n",$num_bases);
   printf("Median: %d\n",$median);
   printf("Mean: %.2f\n",$mean);
-  printf("N50: %d\n",$n50);
-  printf("L50: %d\n",$l50);
+  printf("N50: %s\n",$n50);
+  printf("L50: %s\n",$l50);
   printf("Minimum: %d\n",$min_length);
   printf("Maximum: %d\n",$max_length);
 } else {
@@ -148,8 +157,8 @@ if ( !$opt_s ) {
   printf("%d ",$num_bases);
   printf("%d ",$median);
   printf("%.2f ",$mean);
-  printf("%d ",$n50);
-  printf("%d ",$l50);
+  printf("%s ",$n50);
+  printf("%s ",$l50);
   printf("%d ",$min_length);
   printf("%d\n",$max_length);
 }
