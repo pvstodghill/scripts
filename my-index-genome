@@ -1,0 +1,30 @@
+#! /bin/bash
+
+set -e
+
+if [ -z "$1" -o "$1" = "-h" ] ; then
+    echo 1>&2 "Usage: $0 file.faa file.fna file.gbk file.gff ..."
+    exit
+fi
+
+for f in "$@" ; do
+    case "$f" in
+	*.fna)
+	    t=$(mktemp)
+	    cp "$f" $t
+	    cat $t | sed -e 's/^>lcl|/>/' > "$f"
+	    samtools faidx "$f"
+	    rm -f $t
+	    ;;
+	*.gff)
+	    cat "$f" \
+		| sed -e '/^##FASTA/,$d' \
+		| sort -t$'\t' -k1,1 -k4,4n -k5,5n \
+		| bgzip > "$f".gz
+	    tabix -p gff "$f".gz
+	    rm -f "$f"
+	    ;;
+	*)
+	    : nothing
+    esac
+done
