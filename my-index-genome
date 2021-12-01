@@ -10,13 +10,17 @@ fi
 for f in "$@" ; do
     case "$f" in
 	*.fna)
-	    t=$(mktemp)
-	    cp "$f" $t
-	    cat $t | sed -e 's/^>lcl|/>/' > "$f"
-	    samtools faidx "$f"
-	    rm -f $t
+	    if [ ! -e "$f".fai ] ; then
+		echo 1>&2 '#' Processing "$f"
+		t=$(mktemp)
+		cp "$f" $t
+		cat $t | sed -e 's/^>lcl|/>/' > "$f"
+		samtools faidx "$f"
+		rm -f $t
+	    fi
 	    ;;
 	*.gff)
+	    echo 1>&2 '#' Processing "$f"
 	    cat "$f" \
 		| sed -e '/^##FASTA/,$d' \
 		| sort -t$'\t' -k1,1 -k4,4n -k5,5n \
