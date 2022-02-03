@@ -13,6 +13,7 @@ function usage {
 
     echo 1>&2 "-S STRAIN_NAME - strain name (required)"
     echo 1>&2 "-U - update PGAP, then exit"
+    echo 1>&2 "-V VERSION - the assembly version"
     echo 1>&2 "-f - force overwriting of existing files."
     echo 1>&2 "-h - this message"
     echo 1>&2 "-k - keep temporary files"
@@ -29,11 +30,12 @@ function usage {
     exit "$@"
 }    
 
-while getopts 'S:Ufhkno:p:s:t:u' opt ; do
+while getopts 'S:V:Ufhkno:p:s:t:u' opt ; do
     case "$opt" in
 
 	S) STRAIN_NAME="$OPTARG" ;;
 	U) UPDATE_PGAP=1 ; THEN_EXIT=1 ;;
+	V) VERSION="$OPTARG" ;;
 	f) FORCE=1 ;;
 	h) DISPLAY_HELP=1 ;;
 	k) KEEP_FILES=1 ;;
@@ -173,6 +175,7 @@ elif [ "$TAXON_ID" ] ; then
     cat $0.submol.yaml \
 	| sed -e 's/%%SPECIES%%/'"$SPECIES_NAME"'/g' \
 	| sed -e 's/%%STRAIN%%/'"$STRAIN_NAME"'/g' \
+	| sed -e 's/%%VERSION%%/'"$VERSION"'/g' \
 	      > ${PGAP_DIR}/temp/input/submol.yaml
 fi
 

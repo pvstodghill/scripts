@@ -30,7 +30,7 @@ authors:
 bioproject: 'PRJNA9999999'
 biosample: 'SAMN99999999'      
 # -- Locus tag prefix - optional. Limited to 9 letters. Unless the locus tag prefix was officially assigned by NCBI, ENA, or DDBJ, it will be replaced upon submission of the annotation to NCBI and is therefore temporary and not to be used in publications. If not provided, pgaptmp will be used.
-locus_tag_prefix: '%%STRAIN%%_pgap'
+locus_tag_prefix: '%%STRAIN%%%%VERSION%%_pgap'
 publications:
     - publication:
         pmid: 16397293
