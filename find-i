@@ -1,0 +1,64 @@
+#! /bin/bash
+
+function usage {
+    echo 1>&2 "Usage: $0 [-d] scriptname.bash"
+    echo 1>&2 "-a - strip letters from end"
+    echo 1>&2 "-d - print path to data directory"
+    echo 1>&2 "-h - this message"
+    exit "$@"
+}    
+
+while getopts 'adh' opt ; do
+    case "$opt" in
+	a) opt_a=1 ;;
+	d) opt_d=1 ;;
+	h) opt_h=1 ;;
+	\?) usage 1 ;;
+	*) echo "Can't happen" ; exit 1 ;;
+    esac
+done
+shift $((OPTIND-1))
+
+if [ "$opt_h" ] ; then
+    usage
+fi
+if [ -z "$1" -o "$2" ] ; then
+    usage 1
+fi
+
+NAME="$1"
+
+case "$NAME" in
+    *.bash) NAME="$(basename "$NAME" .bash)" ;;
+    *.sh) NAME="$(basename "$NAME" .sh)" ;;
+    *) :
+esac
+
+case "$NAME" in
+    doit*-*)
+	X=$(echo "$NAME" | sed -r -e 's/^doit([^-]+)-.*/\1/')
+	SEP=
+	;;
+    doit*)
+	X=$(echo "$NAME" | sed -e 's/^doit//')
+	SEP=
+	;;
+    *)
+	X=$(echo "$NAME" | sed -e 's/ /_/g')
+	SEP=_
+esac
+
+if [ "$opt_a" ] ; then
+    X=$(echo "$X" | sed -r -e 's/[a-z]+$//')
+fi
+
+
+if [ "$opt_d" ] ; then
+    if [ -z "$X" ] ; then
+	echo data
+    else
+	echo data/step$SEP$X
+    fi
+else
+    echo $X
+fi
