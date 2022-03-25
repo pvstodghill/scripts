@@ -74,7 +74,13 @@ while (<STDIN>) {
   if ( $opt_n ) {
     $seqname =~ s/\.[0-9]+$//;
   }
-  ( $seqname !~ /\|/ ) || die "cannot parse seqname=<<$seqname>>,";
+  if ( $seqname =~ /\|/ ) {
+    my ($db,$accession,$extra) = split(/[|]/,$seqname);
+    ($db eq "lcl" || $db eq "gb") || die "[1]cannot parse seqname=<<$seqname>>,";
+    ($extra eq "") || die "[2]cannot parse seqname=<<$seqname>>,";
+    $seqname = $accession;
+  }
+
   if (!defined($seqname)) {
     $seqnames{$seqname} = [];
   }
