@@ -59,12 +59,13 @@ my $fh;
 while (<STDIN>) {
   chomp;
   $_ =~ s/\r+//;
-  if ( /^>([^ |]*)/ ) {
+  if ( /^>([^ ]*)/ ) {
     if (defined($fh)) {
       close $fh || die;
     }
     my $name = $1;
     ($name ne "") || die;
+    $name =~ s/^(gb|lcl)[|]//;
     $name =~ s/[|].*//;
     if ($opt_v) {
       $name =~ s/\.[0-9]+$//;
