@@ -1,0 +1,16 @@
+#! /usr/bin/env Rscript
+# -*- R -*-
+
+args <- commandArgs(TRUE)
+if ( length(args) < 1 ) {
+    print("Usage: print-r-library-versions name1 name2 ...")
+    q()
+}
+
+for (i in 1:length(args)) {
+    name <- args[i]
+    suppressPackageStartupMessages(library(package=name, character.only=TRUE))
+    cat(name, ": ")
+    cat(format(packageVersion(name)))
+    cat("\n")
+}
