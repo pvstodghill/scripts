@@ -61,8 +61,9 @@ write.table(results,results.filename,sep="\t")
 if (extended.results.filename != "FALSE") {
     baseMeanPerLvl <- sapply( levels(dds$condition),
                              function(lvl) rowMeans(
-                                               counts(dds,normalized=TRUE)[
-                                                  ,dds$condition == lvl] ) )
+                                               as.data.frame(
+                                                   counts(dds,normalized=TRUE)[
+                                                  ,dds$condition == lvl] ) ) )
 
     xxx <- merge(baseMeanPerLvl, results, by=0, all=FALSE)
     yyy <- xxx[order(xxx$pvalue), ]
