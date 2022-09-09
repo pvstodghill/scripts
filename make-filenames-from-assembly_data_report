@@ -1,0 +1,118 @@
+#! /usr/bin/env perl
+
+use strict;
+use warnings FATAL => 'all';
+#use Carp::Always;
+
+# use FindBin;
+# use lib "$FindBin::Bin";
+# use Xyzzy;
+
+use constant { TRUE => 1, FALSE => 0 };
+
+use JSON qw( decode_json );     # From CPAN
+use Data::Dumper;               # Perl core module
+
+# ------------------------------------------------------------------------
+
+use File::Basename;
+use Getopt::Std;
+
+our $opt_h;
+our $opt_s;
+
+my $usage_str = "";
+my $progname = basename($0);
+$usage_str .= "Usage: cat assembly_data_report.jsonl | $progname [options] exclude_accession1 exclude_accession2 ...\n";
+
+$usage_str .= "-h - print help\n";
+$usage_str .= "-s - only use strain name\n";
+
+sub usage {
+  print STDERR $usage_str;
+  exit(@_);
+}
+
+my $stat = getopts('hs');
+if (!$stat) {
+  usage(1);
+}
+if ($opt_h) {
+  usage();
+}
+
+# ------------------------------------------------------------------------
+
+my $excluded = {};
+
+foreach my $accession ( @ARGV ) {
+  $excluded->{$accession} = TRUE;
+}
+
+# ------------------------------------------------------------------------
+
+
+my $version_of = {};
+my $name_of = {};
+
+# Assumes one JSON entry per line.
+while (<STDIN>) {
+  my $entry = decode_json($_);
+
+  my $raw_accession = $entry->{assemblyInfo}->{assemblyAccession};
+  if ($excluded->{$raw_accession}) { next; }
+  my ($accession,$version,$empty) = split(/\./,$raw_accession);
+  (defined($version) && !(defined($empty)))
+    || die "raw_accession=<<$raw_accession>>,";
+
+  if (defined($version_of->{$accession}) &&
+      $version < $version_of->{$accession}) {
+    next;
+  }
+  $version_of->{$accession} = $version;
+
+  my $organismName = $entry->{organismName};
+  my $strain = $entry->{strain};
+  my $isolate = $entry->{isolate};
+
+  # make the name
+  my $name = "";
+  # if (defined($isolate) && $isolate =~ /^$organismName /) {
+  #   $name = $isolate;
+  # } else {
+  #   $name = $organismName;
+  # }
+  if (!$opt_s) {
+    $name = $organismName;
+  }
+  if (defined($strain) && $name !~ / $strain$/) {
+    $name .= " ".$strain;
+  }
+  if (defined($isolate) &&  $name !~ / $isolate$/) {
+    $name .= " ".$isolate;
+  }
+
+  ($name ne "") || die "empty name,";
+
+
+  # convert the name to a filename
+  $name =~ s/^ +//;
+  $name =~ s/\.? +/_/g;
+
+  $name_of->{$accession} = $name;
+}
+
+# ------------------------------------------------------------------------
+
+my $done = {};
+
+foreach my $accession (sort { $b cmp $a } (keys %{$version_of})) {
+  my $version = $version_of->{$accession};
+  my $raw_accession = $accession.".".$version;
+  my $name = $name_of->{$accession};
+  while (defined($done->{$name})) {
+    $name .= "~";
+  }
+  $done->{$name} = TRUE;
+  print join("\t",$raw_accession,$name),"\n";
+}
