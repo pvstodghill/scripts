@@ -1,0 +1,146 @@
+#! /usr/bin/env perl
+
+use strict;
+use warnings FATAL => 'all';
+#use Carp::Always;
+
+# use FindBin;
+# use lib "$FindBin::Bin";
+# use Xyzzy;
+
+use constant { TRUE => 1, FALSE => 0 };
+
+# ------------------------------------------------------------------------
+# Process the command line
+# ------------------------------------------------------------------------
+
+use File::Basename;
+use Getopt::Std;
+
+our $opt_h;
+
+my $usage_str = "";
+my $progname = basename($0);
+$usage_str .= "Usage: $progname [options] genomic.gff[.gz] protein.faa\n";
+$usage_str .= "-h - print help\n";
+
+sub usage {
+  print STDERR $usage_str;
+  exit(@_);
+}
+
+my $stat = getopts('h');
+if (!$stat) {
+  usage(1);
+}
+if ($opt_h) {
+  usage();
+}
+if (scalar(@ARGV) != 2) {
+  usage(1);
+}
+
+my ($gff_fn,$faa_fn) = @ARGV;
+
+# ------------------------------------------------------------------------
+
+my $gff_fh;
+if ( $gff_fn =~ /\.gz$/ ) {
+  open($gff_fh,"-|","gzip -dc $gff_fn") || die "Cannot read <<$gff_fn>>,";
+} else {
+  open($gff_fh,"<",$gff_fn) || die "Cannot open <<$gff_fn>>,";
+}
+
+use constant { NO_VALUE => ";no-value;" };
+
+sub parse_gff_attributes {
+  my ($raw_attributes) = @_;
+  my $attributes = {};
+  foreach my $key_val (split(/; */,$raw_attributes)) {
+    my ($key,$val);
+    if ( $key_val =~ /^([^=]+)=(.*)/ ) {
+      ($key,$val) = ($1,$2);
+    } else {
+      ($key,$val) = ($key_val, NO_VALUE);
+    }
+    $attributes->{$key} = $val;
+  }
+  return $attributes;
+}
+
+my %locus_tags_of;
+
+while (<$gff_fh>) {
+  chomp;
+  if (/^#/) {
+    next;
+  }
+
+  my ($accession,$source,$feature,$start,$end,
+      $score,$strand,$frame,$raw_attributes) = split(/\t/,$_);
+  my $attributes = parse_gff_attributes($raw_attributes);
+
+  if ($feature ne "CDS") {
+    next;
+  }
+
+  my $Name = $attributes->{Name};
+  if (!defined($Name)) {
+    next;
+  }
+  $Name =~ s/^extdb://;
+
+  my $locus_tag = $attributes->{locus_tag};
+  if (!$locus_tag) {
+    print "<<$_>>\n";
+    die "No locus_tag,";
+  }
+
+  my $l = $locus_tags_of{$Name};
+  if (!defined($l)) {
+    $l = $locus_tags_of{$Name} = [];
+  }
+  push $l->@*, $locus_tag;
+
+}
+
+close($gff_fh);
+
+# ------------------------------------------------------------------------
+
+my $defline;
+my $sequence;
+
+sub process_sequence {
+  if (!defined($defline)) {
+    return;
+  }
+  my ($Name,@descr) = split(" ",$defline);
+  $Name =~ s/^>//;
+  if ($Name =~ /\|/) {
+    ($Name) = reverse(split(/\|/,$Name));
+  }
+  my $locus_tags = $locus_tags_of{$Name};
+  (defined($locus_tags)) || die "No locus_tag for <<$Name>>,";
+  for my $locus_tag ( $locus_tags->@* ) {
+    print join(" ",">".$locus_tag,@descr),"\n";;
+    print $sequence;
+  }
+}
+
+open(my $faa_fh,"<",$faa_fn) || die "Cannot open <<$faa_fn>>,";
+while (<$faa_fh>) {
+  if (/^>/) {
+    process_sequence();
+    chomp;
+    $defline = $_;
+    $sequence = "";
+  } else {
+    $sequence .= $_;
+  }
+}
+process_sequence();
+
+# ------------------------------------------------------------------------
+
+# Done
