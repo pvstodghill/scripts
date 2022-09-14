@@ -1,0 +1,180 @@
+#! /usr/bin/env perl
+
+use strict;
+use warnings;
+
+use Getopt::Std;
+
+
+use FindBin;
+use lib "$FindBin::Bin";
+use PVS;
+
+sub usage {
+  print STDERR "Usage: $0 [options] SEQ.fa < INPUT.gff\n";
+
+  print STDERR "-c - Circular replicon\n";
+  print STDERR "-e COORD - End sequence at COORD\n";
+  print STDERR "-h - This message\n";
+  print STDERR "-m - deflines for MEME\n";
+  print STDERR "-n TAG - take defline from attribute TAG (e.g. locus_tag)\n";
+  print STDERR "-o - Flip to the opposite strand (after transformation!)\n";
+  print STDERR "-r - Generate RNA (U's) instead of DNA (T's)\n";
+  print STDERR "-s COORD - Start sequence at COORD\n";
+  print STDERR "-z - quietly suppress empty strings\n";
+
+  print STDERR "COORD: (start|end)((+|-)NUM)?\n";
+  print STDERR "  default: -s start -e end\n";
+  exit(@_);
+}
+
+our $opt_c;
+our $opt_e = "end";
+our $opt_h;
+our $opt_m;
+our $opt_o = 0;
+our $opt_r;
+our $opt_s = "start";
+our $opt_n;
+our $opt_z;
+
+if ( !getopts('ce:hmn:ors:z') ) {
+  usage(1);
+}
+
+if ( $opt_h ) {
+  usage();
+}
+if ( !defined($ARGV[0]) ) {
+  usage(1);
+}
+
+my %fasta  = PVS::read_fasta($ARGV[0]);
+my %abbrevs;
+
+sub find_seq {
+  my ($seqname) = @_;
+  # found an exact match. return the sequence.
+  if (defined($fasta{$seqname})) {
+    return $fasta{$seqname};
+  }
+  # Already determined that this seqname is an abbrev. return the sequence.
+  if (defined($abbrevs{$seqname})) {
+    return $fasta{$abbrevs{$seqname}};
+  }
+  # See if the seqname might be an abbrev for a full seqname.
+  my $full_name;
+  my @keys = keys %fasta;
+  foreach my $k (@keys) {
+    if (index($k,$seqname) >= 0) {
+      if (defined($full_name)) {
+	$full_name = undef;
+	last;
+      } else {
+	$full_name = $k;
+      }
+    }
+  }
+  if (defined($full_name)) {
+    $abbrevs{$seqname} = $full_name;
+    return $fasta{$full_name};
+  }
+  # If there is only one seq in the fasta file, then just ignore the
+  # seqname and return it. This is the behavior of the previous
+  # version of this script.
+  if ($#keys == 0) {
+    return $fasta{$keys[0]};
+  }
+
+  # Can't figure out what sequence to return. Bail.
+  die "Cannot match seqname to deflines, seqname=$seqname\n";
+}
+
+
+use constant { NO_VALUE => ";no-value;" };
+
+sub parse_gff_attributes {
+  my ($raw_attributes) = @_;
+  my $attributes = {};
+  foreach my $key_val (split(/; */,$raw_attributes)) {
+    my ($key,$val);
+    if ( $key_val =~ /^([^=]+)=(.*)/ ) {
+      ($key,$val) = ($1,$2);
+    } else {
+      ($key,$val) = ($key_val, NO_VALUE);
+    }
+    $attributes->{$key} = $val;
+  }
+  return $attributes;
+}
+
+while(<STDIN>) {
+  chomp;
+  my ($seqname,$source,$feature,$raw_start,$raw_end,
+      $score,$raw_strand,$frame,$raw_attributes,$comments) = split(/\t/,$_);
+  my $attributes = parse_gff_attributes($raw_attributes);
+
+  my ($start,$end,$strand) =
+    PVS::transform_gff_coords($opt_s,$opt_e,$opt_o,$raw_start,$raw_end,$raw_strand);
+
+  my $seq = find_seq($seqname);
+  my $n = length($seq);
+
+  # empty seq or error?
+  if ( $end < $start  ) { die "fixme<1> end=$end, start=$start\n"; }
+  # circular wrap-around
+  my $s;
+  if ( ( $start < 1 || $n < $end ) && !$opt_c ) {
+    print STDERR "# transformed coordinates past end of sequence ($seqname).\n";
+    $s = "";
+  } elsif ( $start < 1 ) {
+    ( $end <= $n ) || die;
+    my ($start1,$end1) = ($start+$n,$n);
+    my ($start2,$end2) = (1,$end);
+    $s = substr($seq, $start1-1, $end1-$start1+1)
+      . substr($seq, $start2-1, $end2-$start2+1);
+  } elsif ( $n < $end ) {
+    ( 1 <= $start ) || die;
+    my ($start1,$end1) = ($start,$n);
+    my ($start2,$end2) = (1,$end-$n);
+    $s = substr($seq, $start1-1, $end1-$start1+1)
+      . substr($seq, $start2-1, $end2-$start2+1);
+  } else {
+    $s = substr($seq, $start-1, $end-$start+1);
+  }
+
+  if ( $s eq "" ) {
+    if (!$opt_z) {
+      print STDERR "# Supressing empty sequence ($seqname).\n";
+    }
+    next;
+  }
+  $s = lc($s);
+  if ($strand eq "-") {
+    $s = PVS::reverse_complement($s);
+  }
+  if ( $opt_r ) {
+    $s =~ tr/t/u/;
+  }
+  if ( $strand eq "-" ) {
+    ($start,$end) = ($end,$start);
+  }
+  if ($opt_n) {
+    my $name = $attributes->{$opt_n};
+    if (!defined($name)) {
+      $name = "fixme:not_found";
+    }
+    print ">$name\n";
+  } elsif ($opt_m) {
+    print ">$start-$end/$seqname\n";
+  } else {
+    print ">$seqname/$start-$end\n";
+  }
+  while (length($s) > 70) {
+    print substr($s,0,70),"\n";
+    $s = substr($s,70);
+  }
+  if ( $s ne "" ) {
+    print $s,"\n";
+  }
+}
