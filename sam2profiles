@@ -38,6 +38,7 @@ our $opt_n = FALSE;
 our $opt_r = FALSE;
 our $opt_s = FALSE;
 our $opt_t;
+our $opt_u;
 
 
 my $usage_str = "";
@@ -56,6 +57,7 @@ $usage_str .= "-n - make naive profiles\n";
 $usage_str .= "-r - aligned reads are anti-sense. Reverse the strand (and ends)\n";
 $usage_str .= "-s - make sinister profiles\n";
 $usage_str .= "-t TAG - string to incorporate into profile file names.\n";
+$usage_str .= "-u - drop multireads (XS:i: present)\n";
 
 $usage_str .= "\n";
 $usage_str .= "Exactly one of -1, -2, or -U is required.\n";
@@ -66,7 +68,7 @@ sub usage {
   exit(@_);
 }
 
-my $stat = getopts('12Ud:ehnrst:');
+my $stat = getopts('12Ud:ehnrst:u');
 
 if (!$stat) {
   usage(1);
@@ -224,11 +226,23 @@ while (<STDIN>) {
     next;
   }
 
-  my ($qname,$flag,$rname,$pos,$mapq,$cigar,$rnext,$pnext,$tlen,$seq)
+  my ($qname,$flag,$rname,$pos,$mapq,$cigar,$rnext,$pnext,$tlen,
+      $seq,$qual,@optional)
     = split(/\t/);
 
   if ( $opt_2 && !($flag & FLAG_PROPER_PAIR) ) {
     next;
+  }
+
+  # Multi-mapped read, or multireads: Can be defined (bowtie2) as
+  # XS:i: is present, could also be defined as AS:i <= XS:i.
+  # https://biofinysics.blogspot.com/2014/05/where-does-bowtie2-assign-true.html
+
+  if ( $opt_u ) {
+    my $optional = join("\t",@optional);
+    if ( $optional =~ /(^|\t)XS:i:/) {
+      next;
+    }
   }
 
   my ($begin,$end,$strand) = fix_coordinates($pos,$flag,$cigar);
