@@ -1,0 +1,9 @@
+#! /bin/bash
+
+for f in "$@" ; do
+    case X"$f"X in
+	X*.gzX) gzip -dc "$f" ;;
+	X*.bz2) bzip2 -dc "$f" ;;
+	*) cat "$f"
+    esac
+done
