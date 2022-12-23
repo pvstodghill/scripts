@@ -1,0 +1,153 @@
+#! /usr/bin/env perl
+
+use strict;
+use warnings;
+
+use Getopt::Std;
+
+our $opt_H;
+our $opt_a = 1;
+our $opt_b = 1;
+our $opt_e;
+our $opt_c;
+our $opt_h;
+our $opt_l;
+our $opt_t = "\t";
+
+sub usage {
+  print STDERR "Usage: $0 [options] a.txt b.txt\n";
+
+  print STDERR "-H - input files have headers\n";
+  print STDERR "-a N - Use column N as key in a.txt\n";
+  print STDERR "-b N - Use column N as key in b.txt\n";
+  print STDERR "-c N - Use column N as key in both inputs\n";
+  print STDERR "-e STR - full outer join and use STR to fill missing fields\n";
+  print STDERR "-h - print help\n";
+  print STDERR "-l - (with -e) left outer join\n";
+  print STDERR "-t CHAR - delimiter (default \\t)\n";
+
+  exit(@_);
+}
+
+my $stat = getopts('Ha:b:c:e:hlt:');
+if (!$stat) {
+  usage(1);
+}
+if ($opt_h) {
+  usage();
+}
+
+if ( defined($opt_c) ) {
+  $opt_a = $opt_b = $opt_c;
+}
+
+my $split_delimiter = qr/$opt_t/;
+my $join_delimiter = $opt_t;
+
+my %keys;
+my %rows_a;
+my %rows_b;
+
+my @header_a;
+my @header_b;
+
+my $row_width_a = -1;
+my $row_width_b = -1;
+
+
+my ($file_a,$file_b) = @ARGV;
+if ( !defined($file_b) ) {
+  usage(1);
+}
+
+open(F,"<$file_a") || die "Cannot open: $file_a";
+while (<F>) {
+  chomp;
+  my @row = split($split_delimiter,$_,-1); # -1 == preserve trailing empty fields
+  if ($opt_H && $. == 1) {
+    @header_a = @row;
+    next;
+  }
+  my $key = splice(@row,$opt_a-1,1);
+  if (!defined($key) || $key eq "") { next; }
+  $keys{$key} = 1;
+  if (!defined ($rows_a{$key})) {
+    $rows_a{$key} = [];
+  }
+  push @{$rows_a{$key}}, [@row];
+  if ( $row_width_a < $#row+1  ) {
+    $row_width_a = $#row+1;
+  }
+}
+close F;
+
+open(F,"<$file_b") || die "Cannot open: $file_b";
+while (<F>) {
+  chomp;
+  my @row = split($split_delimiter,$_,-1);  # -1 == preserve trailing empty fields
+  if ($opt_H && $. == 1) {
+    @header_b = @row;
+    next;
+  }
+  my $key = splice(@row,$opt_b-1,1);
+  if (!defined($key) || $key eq "") { next; }
+  $keys{$key} = 1;
+  if (!defined ($rows_b{$key})) {
+    $rows_b{$key} = [];
+  }
+  push @{$rows_b{$key}}, [@row];
+  if ( $row_width_b < $#row+1  ) {
+    $row_width_b = $#row+1;
+  }
+}
+close F;
+
+my $blank_row_a = [];
+my $blank_row_b = [];
+
+if ( defined($opt_e) ) {
+  for (my $i=0; $i<$row_width_a; $i++) {
+    push @{$blank_row_a}, $opt_e;
+  }
+
+  for (my $i=0; $i<$row_width_b; $i++) {
+    push @{$blank_row_b}, $opt_e;
+  }
+}
+
+if ( $opt_H ) {
+  my $key_a = splice(@header_a,$opt_a-1,1);
+  my $key_b = splice(@header_b,$opt_b-1,1);
+  my $key;
+  if ($key_a eq $key_b) {
+    $key = $key_a;
+  } else {
+    $key = $key_a."/".$key_b;
+  }
+  print join($join_delimiter,$key,@header_a,@header_b),"\n";
+}
+
+
+foreach my $key ( sort (keys %keys) ) {
+  my @rows_a = ();
+  if ( defined($rows_a{$key}) ) {
+    @rows_a = @{$rows_a{$key}};
+  } elsif ( !defined($opt_e) || $opt_l ) {
+    next;
+  } else {
+    @rows_a = ($blank_row_a);
+  }
+  my @rows_b = ();
+  if ( defined($rows_b{$key}) ) {
+    @rows_b = @{$rows_b{$key}};
+  } elsif ( !defined($opt_e) ) {
+    next;
+  } else {
+    @rows_b = ($blank_row_b);
+  }
+  foreach my $row_a ( @rows_a ) {
+    foreach my $row_b ( @rows_b ) {
+      print join($join_delimiter,$key,@{$row_a},@{$row_b}),"\n";
+    }
+  }
+}

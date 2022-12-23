@@ -1,0 +1,61 @@
+#! /bin/bash
+
+_my_join_pair=$(dirname $0)/my-join-pair
+
+function usage {
+    echo 1>&2 "Usage: $0 [options] file1.txt file2.txt ..."
+
+    echo 1>&2 "-H - input files have headers"
+    echo 1>&2 "-c N - Use column N as key in all files"
+    echo 1>&2 "-e STR - full outer join and use STR to fill missing fields"
+    echo 1>&2 "-h - print help"
+    echo 1>&2 "-l - (with -e) left outer join"
+    echo 1>&2 "-t CHAR - delimiter (default \\t)"
+
+    exit "$@"
+}    
+
+ARGS=()
+
+while getopts 'Hc:e:hlt:' opt ; do
+    case "$opt" in
+	H) ARGS+=("-H") ;;
+	c) ARGS+=("-c" "$OPTARG") ;;
+	e) ARGS+=("-e" "$OPTARG") ;;
+	h) opt_h=1 ;;
+	l) ARGS+=("-l") ;;
+	t) ARGS+=("-t" "$OPTARG") ;;
+	\?) usage 1 ;;
+	*) echo 1>&2 "Can't happen" ; exit 1 ;;
+    esac
+done
+shift $((OPTIND-1))
+
+if [ "$opt_h" ] ; then
+    usage
+fi
+
+if [ -z "$2" ] ; then
+    usage 1
+fi
+
+if [ "$2" -a -z "$3" ] ; then
+    $_my_join_pair "${ARGS[@]}" $1 $2
+    exit
+fi
+
+CURR="$1" ; shift 1
+DEL=
+for f in "$@" ; do
+    NEW=$(mktemp)
+	$_my_join_pair "${ARGS[@]}" $CURR "$f" > $NEW
+    if [ "$DEL" ] ; then
+	rm -f $CURR
+    fi
+    CURR=$NEW
+    DEL=1
+done
+cat $CURR
+if [ "$DEL" ] ; then
+    rm -f $CURR
+fi
