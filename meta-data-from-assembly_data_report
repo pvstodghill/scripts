@@ -1,0 +1,81 @@
+#! /usr/bin/env perl
+
+use strict;
+use warnings FATAL => 'all';
+#use Carp::Always;
+
+# use FindBin;
+# use lib "$FindBin::Bin";
+# use Xyzzy;
+
+use constant { TRUE => 1, FALSE => 0 };
+
+use JSON qw( decode_json );     # From CPAN
+use Data::Dumper;               # Perl core module
+
+# ------------------------------------------------------------------------
+
+use File::Basename;
+use Getopt::Std;
+
+our $opt_h;
+
+my $usage_str = "";
+my $progname = basename($0);
+$usage_str .= "Usage: cat assembly_data_report.jsonl | $progname > info.tsv\n";
+
+$usage_str .= "-h - print help\n";
+
+sub usage {
+  print STDERR $usage_str;
+  exit(@_);
+}
+
+my $stat = getopts('h');
+if (!$stat) {
+  usage(1);
+}
+if ($opt_h) {
+  usage();
+}
+
+# ------------------------------------------------------------------------
+# Parse the JSON file(s) and print the necessary meta-data
+# ------------------------------------------------------------------------
+
+# Assumes one JSON entry per line.
+while (<STDIN>) {
+  my $entry = decode_json($_);
+
+  my $accession = $entry->{accession};
+
+  my $organism = $entry->{organism};
+  my $organismName = $organism->{organismName};
+
+  my $raw_strain = $organism->{infraspecificNames}->{strain};
+  my $raw_isolate = $organism->{infraspecificNames}->{isolate};
+
+  if (!defined($raw_strain)) { $raw_strain = ""; }
+  if (!defined($raw_isolate)) { $raw_isolate = ""; }
+
+  my $strain;
+  if ($raw_strain eq $raw_isolate) {
+    $strain = $raw_strain ;
+  } elsif ($raw_isolate eq "") {
+    $strain = $raw_strain;
+  } elsif ($raw_strain eq "") {
+    $strain = $raw_isolate;
+  } else {
+    $strain = $raw_strain."//".$raw_isolate;
+  }
+
+  my $assembly_level = $entry->{assemblyInfo}->{assemblyLevel};
+  my $submission_data = $entry->{assemblyInfo}->{submissionDate};
+
+  print join("\t",$accession,$organismName,$strain,$assembly_level,$submission_data),"\n";
+
+}
+
+# ------------------------------------------------------------------------
+# Done.
+# ------------------------------------------------------------------------
