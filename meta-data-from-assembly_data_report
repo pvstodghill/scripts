@@ -49,6 +49,15 @@ while (<STDIN>) {
 
   my $accession = $entry->{accession};
 
+  my $source;
+  if ($accession =~ /^GCF_/) {
+    $source = "refseq";
+  } elsif ($accession =~ /^GCA_/) {
+    $source = "genbank";
+  } else {
+    die "Cannot assign source to <<$accession>>,";
+  }
+
   my $organism = $entry->{organism};
   my $organismName = $organism->{organismName};
 
@@ -72,7 +81,7 @@ while (<STDIN>) {
   my $assembly_level = $entry->{assemblyInfo}->{assemblyLevel};
   my $submission_data = $entry->{assemblyInfo}->{submissionDate};
 
-  print join("\t",$accession,$organismName,$strain,$assembly_level,$submission_data),"\n";
+  print join("\t",$accession,$source,$organismName,$strain,$assembly_level,$submission_data),"\n";
 
 }
 
