@@ -1,0 +1,251 @@
+#! /usr/bin/env perl
+
+use strict;
+use warnings FATAL => 'all';
+#use Carp::Always;
+
+# use FindBin;
+# use lib "$FindBin::Bin";
+# use Xyzzy;
+
+use constant { TRUE => 1, FALSE => 0 };
+
+use JSON qw( decode_json );     # From CPAN
+use Data::Dumper;               # Perl core module
+
+# ------------------------------------------------------------------------
+
+use File::Basename;
+use Getopt::Std;
+
+our $opt_D;
+our $opt_a;
+our $opt_d;
+our $opt_h;
+our $opt_s;
+our $opt_u;
+
+my $usage_str = "";
+my $progname = basename($0);
+$usage_str .= "Usage: cat .../_metadata_.tsv | $progname [options] exclude_accession1 exclude_accession2 abbr1=fullname1 abbr2=fullname2 ...\n";
+
+$usage_str .= "-D - apply heuristic for eliminating duplicates\n";
+$usage_str .= "-a - remove non-alphanumeric characters from strain names\n";
+$usage_str .= "-d - quit if duplicate names detected\n";
+$usage_str .= "-h - print help\n";
+$usage_str .= "-s - only use strain name\n";
+$usage_str .= "-u - convert strain names to upper case\n";
+
+sub usage {
+  print STDERR $usage_str;
+  exit(@_);
+}
+
+my $stat = getopts('Dadhsu');
+if (!$stat) {
+  usage(1);
+}
+if ($opt_h) {
+  usage();
+}
+
+if ($opt_d && $opt_D) {
+  print STDERR "-D and -d are mutually exclusive\n";
+  exit(1);
+}
+
+# ------------------------------------------------------------------------
+# Note the accessions to exclude
+# ------------------------------------------------------------------------
+
+my $excluded = {};
+my $abbrevs = {} ;
+
+foreach my $arg ( @ARGV ) {
+  if ( $arg =~ /(.*)=(.*)/ ) {
+    my ($short,$long) = ($1,$2);
+    $abbrevs->{$long} = $short;
+  } else {
+    $excluded->{$arg} = TRUE;
+  }
+}
+
+# ------------------------------------------------------------------------
+# Parse the JSON file(s) and store the necessary meta-data
+# ------------------------------------------------------------------------
+
+my $filename_of = {};
+my $assembly_level_of = {};
+my $source_of = {};
+my $date_of = {};
+
+# Assumes one JSON entry per line.
+while (<STDIN>) {
+  chomp;
+  my ($Accession,$Source,$Organism,$Strain,$Level,$Date,
+      $Seqs,$Bases,$Median,$Mean,$N50,$L50,$Min,$Max,
+      $busco_db,$busco_C,$busco_S,$busco_D,$busco_F,
+      $busco_M,$busco_n) = split(/\t/);
+
+  if ($Accession eq "Accession") { next; }
+  
+  my $accession = $Accession;
+  if ($excluded->{$accession}) { next; }
+
+  # make the name
+  my $name = "";
+  if (!$opt_s) {
+    $name = $Organism;
+  }
+  if (defined($Strain) && $name !~ / $Strain$/) {
+    if ( $Organism eq substr($Strain,0,length($Organism)) ) {
+      $name .= " ".substr($Strain,length($Organism));
+    } else {
+      $name .= " ".$Strain;
+    }
+  }
+
+  ($name ne "") || die "empty name <<$accession>>,";
+
+  # convert the name to a filename
+  my $filename = $name;
+  $filename =~ s/^ +//;
+  $filename =~ s/\.? +/_/g;
+
+  if ($opt_u) {
+    $filename = uc($filename);
+  }
+  if ($opt_a) {
+    $filename =~ s/[^A-Z0-9]//g;
+  }
+
+  foreach my $long ( keys $abbrevs->%* ) {
+    if ( $long eq substr($filename,0,length($long)) ) {
+      $filename = $abbrevs->{$long} . substr($filename,length($long));
+      last;
+    }
+  }
+
+  $filename_of->{$accession} = $filename;
+
+  # note the source
+  if ( $Source eq "genbank" ) {
+    $source_of->{$accession} = 1;
+  } elsif ( $Source eq "refseq" ) {
+    $source_of->{$accession} = 2;
+  } else {
+    $source_of->{$accession} = 3;
+  }
+
+  # note the assembly-level
+  if ($Level eq "Contig") {
+    $assembly_level_of->{$accession} = 1;
+  } elsif ($Level eq "Scaffold") {
+    $assembly_level_of->{$accession} = 2;
+  } elsif ($Level eq "Chromosome") {
+    $assembly_level_of->{$accession} = 3;
+  } elsif ($Level eq "Complete Genome") {
+    $assembly_level_of->{$accession} = 4;
+  } else {
+    die "assembly_level=<<$Level>>,";
+  }
+
+  # note submission date
+  $date_of->{$accession} = $Date;
+}
+
+# ------------------------------------------------------------------------
+# Group the accessions by filenames
+# ------------------------------------------------------------------------
+
+my $accessions_of_filename = {};
+
+foreach my $accession (sort { $b cmp $a } (keys %{$filename_of})) {
+  my $filename = $filename_of->{$accession};
+  my $a = $accessions_of_filename->{$filename};
+  if (!defined($a)) {
+    $a = $accessions_of_filename->{$filename} = [];
+  }
+  push @{$a}, $accession;
+}
+
+# ------------------------------------------------------------------------
+# Ordering function for accessions with the same file name
+# ------------------------------------------------------------------------
+
+# accession $a is "greater" than accession $b if it has
+# - a "greater" assembly level, ||
+# - a more recent deposit data, ||
+# - a "greater" accession number
+
+sub cmp_accession {
+  my ($a,$b) = @_;
+  (defined($assembly_level_of->{$a})) || die "a=<<$a>>,";
+  (defined($assembly_level_of->{$b})) || die "b=<<$b>>,";
+  return
+    ($source_of->{$a} <=> $source_of->{$b})
+    || ($assembly_level_of->{$a} <=> $assembly_level_of->{$b})
+    || $date_of->{$a} cmp $date_of->{$b}
+    || $a cmp $b;
+}
+
+# ------------------------------------------------------------------------
+# Look for and process duplicate filenames
+# ------------------------------------------------------------------------
+
+my $final_filename_of = {};
+
+my $dups = FALSE;
+foreach my $filename (sort (keys %{$accessions_of_filename})) {
+  my @accessions = @{$accessions_of_filename->{$filename}};
+  if ( scalar(@accessions) > 1 ) {
+    if (!$dups) {
+      print STDERR "\n";
+      print STDERR "Multiple accessions detected for strains:\n";
+      $dups = TRUE;
+    }
+    print STDERR "\n$filename\n";
+
+    if ($opt_d) {
+      foreach my $accession (sort @accessions) {
+	print STDERR "- $accession\n";
+      }
+    } elsif ($opt_D) {
+      my ($keep,@drop) = sort { cmp_accession($b,$a) } @accessions;
+      print STDERR "- keeping: $keep\n";
+      print STDERR "- dropping: ",join(", ",reverse(@drop)),"\n";
+      $final_filename_of->{$keep} = $filename;
+    } else {
+      my ($first,@rest) = reverse(sort @accessions);
+      my $new_filename = $final_filename_of->{$first} = $filename;
+      print STDERR "- $first -> $new_filename\n";
+      foreach my $next (@rest) {
+	$new_filename .= "~";
+	$final_filename_of->{$next} = $new_filename;
+	print STDERR "- $next -> $new_filename\n";
+      }
+    }
+  } else {
+    (scalar(@accessions) == 1) || die;
+    $final_filename_of->{$accessions[0]} = $filename;
+  }
+}
+
+if ($dups && $opt_d) { exit 1; }
+
+# ------------------------------------------------------------------------
+# Print the results
+# ------------------------------------------------------------------------
+
+my $done = {};
+
+foreach my $accession (sort (keys %{$final_filename_of})) {
+  my $filename = $final_filename_of->{$accession};
+  (!$done->{$filename}) || die;
+  $done->{$filename} = TRUE;
+  print join("\t",$accession,$filename),"\n";
+}
+
+# ------------------------------------------------------------------------
+# Done.
+# ------------------------------------------------------------------------
