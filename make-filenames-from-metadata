@@ -71,26 +71,25 @@ foreach my $arg ( @ARGV ) {
 }
 
 # ------------------------------------------------------------------------
-# Parse the JSON file(s) and store the necessary meta-data
+# Parse the metadata tsv file(s) and store the necessary meta-data
 # ------------------------------------------------------------------------
 
 my $filename_of = {};
 my $assembly_level_of = {};
 my $source_of = {};
 my $date_of = {};
+my $rest_of = {};
 
-# Assumes one JSON entry per line.
 while (<STDIN>) {
   chomp;
-  my ($Accession,$Source,$Organism,$Strain,$Level,$Date,
-      $Seqs,$Bases,$Median,$Mean,$N50,$L50,$Min,$Max,
-      $busco_db,$busco_C,$busco_S,$busco_D,$busco_F,
-      $busco_M,$busco_n) = split(/\t/);
+  my ($Accession,$Source,$Organism,$Strain,$Level,$Date) = split(/\t/);
 
   if ($Accession eq "Accession") { next; }
   
   my $accession = $Accession;
   if ($excluded->{$accession}) { next; }
+
+  $rest_of->{$accession} = [ $Source,$Organism,$Strain,$Level,$Date ];
 
   # make the name
   my $name = "";
@@ -239,11 +238,13 @@ if ($dups && $opt_d) { exit 1; }
 
 my $done = {};
 
+print join("\t","Accession","Filename","Source","Organism","Strain","Level","Date"),"\n";
+
 foreach my $accession (sort (keys %{$final_filename_of})) {
   my $filename = $final_filename_of->{$accession};
   (!$done->{$filename}) || die;
   $done->{$filename} = TRUE;
-  print join("\t",$accession,$filename),"\n";
+  print join("\t",$accession,$filename,$rest_of->{$accession}->@*),"\n";
 }
 
 # ------------------------------------------------------------------------
