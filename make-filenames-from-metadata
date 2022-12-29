@@ -59,12 +59,12 @@ if ($opt_d && $opt_D) {
 # ------------------------------------------------------------------------
 
 my $excluded = {};
-my $abbrevs = {} ;
+my @abbrevs;
 
 foreach my $arg ( @ARGV ) {
   if ( $arg =~ /(.*)=(.*)/ ) {
     my ($short,$long) = ($1,$2);
-    $abbrevs->{$long} = $short;
+    push @abbrevs, [$long,$short];
   } else {
     $excluded->{$arg} = TRUE;
   }
@@ -85,42 +85,40 @@ while (<STDIN>) {
   my ($Accession,$Source,$Organism,$Strain,$Level,$Date) = split(/\t/);
 
   if ($Accession eq "Accession") { next; }
-  
+
   my $accession = $Accession;
   if ($excluded->{$accession}) { next; }
 
   $rest_of->{$accession} = [ $Source,$Organism,$Strain,$Level,$Date ];
 
-  # make the name
-  my $name = "";
-  if (!$opt_s) {
-    $name = $Organism;
-  }
-  if (defined($Strain) && $name !~ / $Strain$/) {
-    if ( $Organism eq substr($Strain,0,length($Organism)) ) {
-      $name .= " ".substr($Strain,length($Organism));
-    } else {
-      $name .= " ".$Strain;
-    }
+  my $SafeStrain = $Strain;
+  if ( defined($SafeStrain) && $opt_a ) {
+    $SafeStrain =~ s/[^A-Za-z0-9_-]+//g;
   }
 
-  ($name ne "") || die "empty name <<$accession>>,";
+  # make the filename
+  my $filename;
+  if ($opt_s) {
+    $filename = $SafeStrain;
+  } else {
+    $filename = $Organism." ".$SafeStrain;
+  }
 
-  # convert the name to a filename
-  my $filename = $name;
+  # cleanup
+  ($filename ne "") || die "empty filename <<$accession>>,";
   $filename =~ s/^ +//;
   $filename =~ s/\.? +/_/g;
 
   if ($opt_u) {
     $filename = uc($filename);
   }
-  if ($opt_a) {
-    $filename =~ s/[^A-Z0-9]//g;
-  }
 
-  foreach my $long ( keys $abbrevs->%* ) {
+  $filename =~ s/[^A-Za-z0-9_-]+/_/g;
+
+  foreach my $long_short (@abbrevs) {
+    my ($long,$short) = $long_short->@*;
     if ( $long eq substr($filename,0,length($long)) ) {
-      $filename = $abbrevs->{$long} . substr($filename,length($long));
+      $filename = $short . substr($filename,length($long));
       last;
     }
   }
