@@ -74,7 +74,7 @@ foreach my $arg ( @ARGV ) {
 # Parse the metadata tsv file(s) and store the necessary meta-data
 # ------------------------------------------------------------------------
 
-my $filename_of = {};
+my $name_of = {};
 my $assembly_level_of = {};
 my $source_of = {};
 my $date_of = {};
@@ -96,34 +96,34 @@ while (<STDIN>) {
     $SafeStrain =~ s/[^A-Za-z0-9_-]+//g;
   }
 
-  # make the filename
-  my $filename;
+  # make the name
+  my $name;
   if ($opt_s) {
-    $filename = $SafeStrain;
+    $name = $SafeStrain;
   } else {
-    $filename = $Organism." ".$SafeStrain;
+    $name = $Organism." ".$SafeStrain;
   }
 
   # cleanup
-  ($filename ne "") || die "empty filename <<$accession>>,";
-  $filename =~ s/^ +//;
-  $filename =~ s/\.? +/_/g;
+  ($name ne "") || die "empty name <<$accession>>,";
+  $name =~ s/^ +//;
+  $name =~ s/\.? +/_/g;
 
   if ($opt_u) {
-    $filename = uc($filename);
+    $name = uc($name);
   }
 
-  $filename =~ s/[^A-Za-z0-9_-]+/_/g;
+  $name =~ s/[^A-Za-z0-9_-]+/_/g;
 
   foreach my $long_short (@abbrevs) {
     my ($long,$short) = $long_short->@*;
-    if ( $long eq substr($filename,0,length($long)) ) {
-      $filename = $short . substr($filename,length($long));
+    if ( $long eq substr($name,0,length($long)) ) {
+      $name = $short . substr($name,length($long));
       last;
     }
   }
 
-  $filename_of->{$accession} = $filename;
+  $name_of->{$accession} = $name;
 
   # note the source
   if ( $Source eq "genbank" ) {
@@ -155,13 +155,13 @@ while (<STDIN>) {
 # Group the accessions by filenames
 # ------------------------------------------------------------------------
 
-my $accessions_of_filename = {};
+my $accessions_of_name = {};
 
-foreach my $accession (sort { $b cmp $a } (keys %{$filename_of})) {
-  my $filename = $filename_of->{$accession};
-  my $a = $accessions_of_filename->{$filename};
+foreach my $accession (sort { $b cmp $a } (keys %{$name_of})) {
+  my $name = $name_of->{$accession};
+  my $a = $accessions_of_name->{$name};
   if (!defined($a)) {
-    $a = $accessions_of_filename->{$filename} = [];
+    $a = $accessions_of_name->{$name} = [];
   }
   push @{$a}, $accession;
 }
@@ -190,18 +190,18 @@ sub cmp_accession {
 # Look for and process duplicate filenames
 # ------------------------------------------------------------------------
 
-my $final_filename_of = {};
+my $final_name_of = {};
 
 my $dups = FALSE;
-foreach my $filename (sort (keys %{$accessions_of_filename})) {
-  my @accessions = @{$accessions_of_filename->{$filename}};
+foreach my $name (sort (keys %{$accessions_of_name})) {
+  my @accessions = @{$accessions_of_name->{$name}};
   if ( scalar(@accessions) > 1 ) {
     if (!$dups) {
       print STDERR "\n";
       print STDERR "Multiple accessions detected for strains:\n";
       $dups = TRUE;
     }
-    print STDERR "\n$filename\n";
+    print STDERR "\n$name\n";
 
     if ($opt_d) {
       foreach my $accession (sort @accessions) {
@@ -211,20 +211,20 @@ foreach my $filename (sort (keys %{$accessions_of_filename})) {
       my ($keep,@drop) = sort { cmp_accession($b,$a) } @accessions;
       print STDERR "- keeping: $keep\n";
       print STDERR "- dropping: ",join(", ",reverse(@drop)),"\n";
-      $final_filename_of->{$keep} = $filename;
+      $final_name_of->{$keep} = $name;
     } else {
       my ($first,@rest) = reverse(sort @accessions);
-      my $new_filename = $final_filename_of->{$first} = $filename;
-      print STDERR "- $first -> $new_filename\n";
+      my $new_name = $final_name_of->{$first} = $name;
+      print STDERR "- $first -> $new_name\n";
       foreach my $next (@rest) {
-	$new_filename .= "~";
-	$final_filename_of->{$next} = $new_filename;
-	print STDERR "- $next -> $new_filename\n";
+	$new_name .= "~";
+	$final_name_of->{$next} = $new_name;
+	print STDERR "- $next -> $new_name\n";
       }
     }
   } else {
     (scalar(@accessions) == 1) || die;
-    $final_filename_of->{$accessions[0]} = $filename;
+    $final_name_of->{$accessions[0]} = $name;
   }
 }
 
@@ -236,13 +236,13 @@ if ($dups && $opt_d) { exit 1; }
 
 my $done = {};
 
-print join("\t","Accession","Filename","Source","Organism","Strain","Level","Date"),"\n";
+print join("\t","Name","Accession","Source","Organism","Strain","Level","Date"),"\n";
 
-foreach my $accession (sort (keys %{$final_filename_of})) {
-  my $filename = $final_filename_of->{$accession};
-  (!$done->{$filename}) || die;
-  $done->{$filename} = TRUE;
-  print join("\t",$accession,$filename,$rest_of->{$accession}->@*),"\n";
+foreach my $accession (sort (keys %{$final_name_of})) {
+  my $name = $final_name_of->{$accession};
+  (!$done->{$name}) || die;
+  $done->{$name} = TRUE;
+  print join("\t",$name,$accession,$rest_of->{$accession}->@*),"\n";
 }
 
 # ------------------------------------------------------------------------
