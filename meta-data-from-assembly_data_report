@@ -78,6 +78,13 @@ while (<STDIN>) {
     $strain = $raw_strain."//".$raw_isolate;
   }
 
+  if ( $organismName =~ /^(.+) $strain$/ ) {
+    $organismName = $1;
+  }
+  if ( $strain =~ /^$organismName (.+)$/ ) {
+    $strain = $1;
+  }
+
   my $assembly_level = $entry->{assemblyInfo}->{assemblyLevel};
   my $submission_data = $entry->{assemblyInfo}->{submissionDate};
 
