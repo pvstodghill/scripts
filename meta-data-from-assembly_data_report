@@ -59,7 +59,7 @@ while (<STDIN>) {
   }
 
   my $organism = $entry->{organism};
-  my $organismName = $organism->{organismName};
+  my $organismName = $organism->{organismName} || $organism->{organism_name};
 
   my $raw_strain = $organism->{infraspecificNames}->{strain};
   my $raw_isolate = $organism->{infraspecificNames}->{isolate};
@@ -85,8 +85,10 @@ while (<STDIN>) {
     $strain = $1;
   }
 
-  my $assembly_level = $entry->{assemblyInfo}->{assemblyLevel};
-  my $submission_data = $entry->{assemblyInfo}->{submissionDate};
+  my $assembly_info = $entry->{assemblyInfo} || $entry->{assembly_info};
+
+  my $assembly_level = $assembly_info->{assemblyLevel} || $assembly_info->{assembly_level};
+  my $submission_data = $assembly_info->{submissionDate} || $assembly_info->{submission_date};
 
   print join("\t",$accession,$source,$organismName,$strain,$assembly_level,$submission_data),"\n";
 
