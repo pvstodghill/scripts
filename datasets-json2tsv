@@ -43,9 +43,8 @@ if ($opt_h) {
 # Parse the JSON file(s) and print the necessary meta-data
 # ------------------------------------------------------------------------
 
-# Assumes one JSON entry per line.
-while (<STDIN>) {
-  my $entry = decode_json($_);
+sub process_entry {
+  my ($entry) = @_;
 
   my $accession = $entry->{accession};
 
@@ -92,6 +91,18 @@ while (<STDIN>) {
 
   print join("\t",$accession,$source,$organismName,$strain,$assembly_level,$submission_data),"\n";
 
+}
+
+while (<STDIN>) {
+  my $entry = decode_json($_);
+
+  if ($entry->{reports}) {
+    foreach my $entry2 ($entry->{reports}->@*) {
+      process_entry($entry2);
+    }
+  } else {
+    process_entry($entry);
+  }
 }
 
 # ------------------------------------------------------------------------
