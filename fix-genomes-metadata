@@ -1,0 +1,103 @@
+#! /usr/bin/env perl
+
+use strict;
+use feature 'postderef';
+use warnings FATAL => 'all';
+no warnings "experimental::postderef";
+#use Carp::Always;
+
+# use FindBin;
+# use lib "$FindBin::Bin";
+# use Xyzzy;
+
+use constant { TRUE => 1, FALSE => 0 };
+
+# ------------------------------------------------------------------------
+
+use File::Basename;
+use Getopt::Std;
+
+our $opt_H;
+our $opt_h;
+our $opt_n;
+
+my $usage_str = "";
+my $progname = basename($0);
+$usage_str .= "Usage: $progname [options] ...\n";
+
+$usage_str .= "-H - print header and exit\n";
+$usage_str .= "-h - print help\n";
+$usage_str .= "-n - don't print header\n";
+
+sub usage {
+  print STDERR $usage_str;
+  exit(@_);
+}
+
+my $stat = getopts('Hhn');
+if (!$stat) {
+  usage(1);
+}
+if ($opt_h) {
+  usage();
+}
+if (scalar(@ARGV) != 0) {
+  usage(1);
+}
+
+# ------------------------------------------------------------------------
+
+my @out_header = ();
+push @out_header, "Accession";
+push @out_header, "Source";
+push @out_header, "Organism";
+push @out_header, "Strain";
+push @out_header, "Level";
+push @out_header, "Date";
+push @out_header, "Category";
+push @out_header, "TypeCode";
+
+if (!$opt_n) {
+  print join("\t",@out_header),"\n";
+}
+
+if ( $opt_H ) {
+  exit;
+}
+
+# ------------------------------------------------------------------------
+
+defined($_ = <STDIN>) || die "Missing header";
+chomp;
+my @in_header = split(/\t/);
+
+my %h;
+for (my $i=0; $i<scalar(@in_header); $i++) {
+  (!defined($h{$in_header[$i]}) || die "Multiple occurances of column: $in_header[$i],");
+  $h{$in_header[$i]} = $i;
+}
+
+my @indices = ();
+for (my $j=0; $j<scalar(@out_header); $j++) {
+  my $i = $h{$out_header[$j]};
+  if (!defined($i)) {
+    $i = -1;
+  }
+  push @indices, $i;
+}
+
+# ------------------------------------------------------------------------
+
+while (<STDIN>) {
+  chomp;
+  my @in_fields = split("\t");
+  my @out_fields;
+  for (my $j=0; $j<scalar(@indices); $j++) {
+    if ($j == -1 || !defined($in_fields[$j])) {
+      push @out_fields, "";
+    } else {
+      push @out_fields, $in_fields[$j];
+    }
+  }
+  print join("\t",@out_fields),"\n";
+}
