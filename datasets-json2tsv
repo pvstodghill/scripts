@@ -10,7 +10,7 @@ use warnings FATAL => 'all';
 
 use constant { TRUE => 1, FALSE => 0 };
 
-use JSON qw( decode_json );     # From CPAN
+use JSON qw( decode_json encode_json );     # From CPAN
 use Data::Dumper;               # Perl core module
 
 # ------------------------------------------------------------------------
@@ -42,6 +42,8 @@ if ($opt_h) {
 # ------------------------------------------------------------------------
 # Parse the JSON file(s) and print the necessary meta-data
 # ------------------------------------------------------------------------
+
+my $headered = FALSE;
 
 sub process_entry {
   my ($entry) = @_;
@@ -87,9 +89,30 @@ sub process_entry {
   my $assembly_info = $entry->{assemblyInfo} || $entry->{assembly_info};
 
   my $assembly_level = $assembly_info->{assemblyLevel} || $assembly_info->{assembly_level};
-  my $submission_data = $assembly_info->{submissionDate} || $assembly_info->{submission_date};
+  my $submission_date = $assembly_info->{submissionDate} || $assembly_info->{submission_date};
+  my $representative = "";
+  if (defined($assembly_info->{refseqCategory})) {
+    $representative = $assembly_info->{refseqCategory};
+  } elsif (defined($assembly_info->{refseq_category})) {
+    $representative = $assembly_info->{refseq_category};
+  }
 
-  print join("\t",$accession,$source,$organismName,$strain,$assembly_level,$submission_data),"\n";
+
+  my $type_info = "";
+  if ( defined($entry->{typeMaterial}) ) {
+    $type_info = $entry->{typeMaterial}->{typeLabel};
+  } elsif  ( defined($entry->{type_material}) ) {
+    $type_info = $entry->{type_material}->{type_label};
+  }
+
+  if (!$headered) {
+    print join("\t","Accession","Source","Organism","Strain","Level","Date",
+	       "Category","TypeCode"),"\n";
+    $headered = TRUE;
+  }
+
+  print join("\t",$accession,$source,$organismName,$strain,$assembly_level,$submission_date,
+	    $representative,$type_info),"\n";
 
 }
 
