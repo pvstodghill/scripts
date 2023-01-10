@@ -80,16 +80,22 @@ my $source_of = {};
 my $date_of = {};
 my $rest_of = {};
 
+my @header;
+
 while (<STDIN>) {
   chomp;
-  my ($Accession,$Source,$Organism,$Strain,$Level,$Date) = split(/\t/);
+  my @fields = split(/\t/);
+  my ($Accession,$Source,$Organism,$Strain,$Level,$Date,@Etc) = @fields;
 
-  if ($Accession eq "Accession") { next; }
+  if ($Accession eq "Accession") {
+    @header = @fields;
+    next;
+  }
 
   my $accession = $Accession;
   if ($excluded->{$accession}) { next; }
 
-  $rest_of->{$accession} = [ $Source,$Organism,$Strain,$Level,$Date ];
+  $rest_of->{$accession} = [ $Source,$Organism,$Strain,$Level,$Date,@Etc ];
 
   my $SafeStrain = $Strain;
   if ( defined($SafeStrain) && $opt_a ) {
@@ -236,7 +242,7 @@ if ($dups && $opt_d) { exit 1; }
 
 my $done = {};
 
-print join("\t","Name","Accession","Source","Organism","Strain","Level","Date"),"\n";
+print join("\t","Name",@header),"\n";
 
 foreach my $accession (sort (keys %{$final_name_of})) {
   my $name = $final_name_of->{$accession};
