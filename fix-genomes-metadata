@@ -68,8 +68,8 @@ if ( $opt_H ) {
 # ------------------------------------------------------------------------
 
 defined($_ = <STDIN>) || die "Missing header";
-chomp;
-my @in_header = split(/\t/);
+chomp; s/\r$//;
+my @in_header = split(/\t/,$_,-1);
 
 my %h;
 for (my $i=0; $i<scalar(@in_header); $i++) {
@@ -89,8 +89,8 @@ for (my $j=0; $j<scalar(@out_header); $j++) {
 # ------------------------------------------------------------------------
 
 while (<STDIN>) {
-  chomp;
-  my @in_fields = split("\t");
+  chomp; s/\r$//;
+  my @in_fields = split(/\t/,$_,-1);
   my @out_fields;
   for (my $j=0; $j<scalar(@indices); $j++) {
     if ($j == -1 || !defined($in_fields[$j])) {

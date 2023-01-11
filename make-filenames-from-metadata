@@ -53,7 +53,6 @@ if ($opt_d && $opt_D) {
   print STDERR "-D and -d are mutually exclusive\n";
   exit(1);
 }
-
 # ------------------------------------------------------------------------
 # Note the accessions to exclude
 # ------------------------------------------------------------------------
@@ -83,8 +82,8 @@ my $rest_of = {};
 my @header;
 
 while (<STDIN>) {
-  chomp;
-  my @fields = split(/\t/);
+  chomp; s/\r$//;
+  my @fields = split(/\t/,$_,-1);
   my ($Accession,$Source,$Organism,$Strain,$Level,$Date,@Etc) = @fields;
 
   if ($Accession eq "Accession") {
