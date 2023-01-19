@@ -57,10 +57,19 @@ if ( $opt_a + $opt_q != 1 ) {
 
 my @lens;
 
+my $do_spot_check = TRUE;
+
 if ( $opt_q ) {
 
   my $linenum=0;
   while (<STDIN>) {
+    if ($do_spot_check) {
+      if ($_ !~ /^@/ ) {
+	print STDERR "Does not appear to be a FASTQ file. Did you forget to uncompress?\n";
+	exit(1);
+      }
+      $do_spot_check = FALSE;
+    }
     $linenum++;
     if ($linenum == 2) {
       chomp;
@@ -74,6 +83,13 @@ if ( $opt_q ) {
 } elsif ( $opt_a ) {
   my $seq;
   while (<STDIN>) {
+    if ($do_spot_check) {
+      if ($_ !~ /^>/ ) {
+	print STDERR "Does not appear to be a FASTA file. Did you forget to uncompress?\n";
+	exit(1);
+      }
+      $do_spot_check = FALSE;
+    }
     chomp;
     if (/>/) {
       if (defined($seq)) {
