@@ -62,8 +62,9 @@ sub process_entry {
   my $organism = $entry->{organism};
   my $organismName = $organism->{organismName} || $organism->{organism_name};
 
-  my $raw_strain = $organism->{infraspecificNames}->{strain};
-  my $raw_isolate = $organism->{infraspecificNames}->{isolate};
+  my $infraspecificNames = $organism->{infraspecificNames} || $organism->{infraspecific_names};
+  my $raw_strain = $infraspecificNames->{strain};
+  my $raw_isolate = $infraspecificNames->{isolate};
 
   if (!defined($raw_strain)) { $raw_strain = ""; }
   if (!defined($raw_isolate)) { $raw_isolate = ""; }
