@@ -44,6 +44,9 @@ echo "${PS4}cd $REFSEEK"
 cd $REFSEEK
 
 
+export HOWTO_MOUNT_DIR=
+export HOWTO_TMPDIR=
+
 echo 1>&2 '### Refseq'
 (
     set -x
