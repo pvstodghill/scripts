@@ -12,6 +12,10 @@ use constant { TRUE => 1, FALSE => 0 };
 
 use constant { DEFAULT_LIMIT => -1, DEFAULT_START_ROW => 1 };
 
+# 'wide character' warning.
+binmode(STDIN, ":utf8");
+binmode(STDOUT, ":utf8");
+
 use Getopt::Std;
 use Excel::Writer::XLSX;
 use Text::CSV::Simple;
