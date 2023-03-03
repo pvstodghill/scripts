@@ -81,6 +81,8 @@ my $rest_of = {};
 
 my @header;
 
+my $found_excluded = FALSE;
+
 while (<STDIN>) {
   chomp; s/\r$//;
   my @fields = split(/\t/,$_,-1);
@@ -92,7 +94,14 @@ while (<STDIN>) {
   }
 
   my $accession = $Accession;
-  if ($excluded->{$accession}) { next; }
+  if ($excluded->{$accession}) {
+    if (!$found_excluded) {
+      $found_excluded = TRUE;
+      print STDERR "\nExcluding:\n\n";
+    }
+    print STDERR "  - $accession\n";
+    next;
+  }
 
   $rest_of->{$accession} = [ $Source,$Organism,$Strain,$Level,$Date,@Etc ];
 
@@ -233,6 +242,9 @@ foreach my $name (sort (keys %{$accessions_of_name})) {
   }
 }
 
+if ($dups) {
+  printf STDERR "\n";
+}
 if ($dups && $opt_d) { exit 1; }
 
 # ------------------------------------------------------------------------
