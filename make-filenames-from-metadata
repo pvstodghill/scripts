@@ -86,7 +86,7 @@ my $found_excluded = FALSE;
 while (<STDIN>) {
   chomp; s/\r$//;
   my @fields = split(/\t/,$_,-1);
-  my ($Accession,$Source,$Organism,$Strain,$Level,$Date,@Etc) = @fields;
+  my ($Accession,$Source,$Organism,$Strain,$Level,$Status,$Date,@Etc) = @fields;
 
   if ($Accession eq "Accession") {
     @header = @fields;
@@ -103,7 +103,7 @@ while (<STDIN>) {
     next;
   }
 
-  $rest_of->{$accession} = [ $Source,$Organism,$Strain,$Level,$Date,@Etc ];
+  $rest_of->{$accession} = [ $Source,$Organism,$Strain,$Level,$Status,$Date,@Etc ];
 
   my $SafeStrain = $Strain;
   if ( defined($SafeStrain) && $opt_a ) {

@@ -53,6 +53,7 @@ push @out_header, "Source";
 push @out_header, "Organism";
 push @out_header, "Strain";
 push @out_header, "Level";
+push @out_header, "Status";
 push @out_header, "Date";
 push @out_header, "Category";
 push @out_header, "TypeCode";
