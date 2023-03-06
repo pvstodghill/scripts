@@ -23,7 +23,9 @@ our $opt_S;
 our $opt_a;
 our $opt_d;
 our $opt_h;
+our $opt_r;
 our $opt_s;
+our $opt_t;
 our $opt_u;
 
 my $usage_str = "";
@@ -35,7 +37,9 @@ $usage_str .= "-S - exclude \"suppressed\" assemblies";
 $usage_str .= "-a - remove non-alphanumeric characters from strain names\n";
 $usage_str .= "-d - quit if duplicate names detected\n";
 $usage_str .= "-h - print help\n";
+$usage_str .= "-r - add representative (R) prefixes\n";
 $usage_str .= "-s - only use strain name\n";
+$usage_str .= "-t - add type (T) and pathotype (P) prefixes\n";
 $usage_str .= "-u - convert strain names to upper case\n";
 
 sub usage {
@@ -43,7 +47,7 @@ sub usage {
   exit(@_);
 }
 
-my $stat = getopts('SDadhsu');
+my $stat = getopts('SDadhrstu');
 if (!$stat) {
   usage(1);
 }
@@ -55,6 +59,7 @@ if ($opt_d && $opt_D) {
   print STDERR "-D and -d are mutually exclusive\n";
   exit(1);
 }
+
 # ------------------------------------------------------------------------
 # Note the accessions to exclude
 # ------------------------------------------------------------------------
@@ -81,6 +86,9 @@ my $source_of = {};
 my $date_of = {};
 my $rest_of = {};
 
+my $is_repr = {};
+my $is_type = {};
+
 my @header;
 
 my $found_excluded = FALSE;
@@ -88,7 +96,8 @@ my $found_excluded = FALSE;
 while (<STDIN>) {
   chomp; s/\r$//;
   my @fields = split(/\t/,$_,-1);
-  my ($Accession,$Source,$Organism,$Strain,$Level,$Status,$Date,@Etc) = @fields;
+  my ($Accession,$Source,$Organism,$Strain,$Level,$Status,$Date,
+      $Category,$TypeCode,@Etc) = @fields;
 
   if ($Accession eq "Accession") {
     @header = @fields;
@@ -114,7 +123,8 @@ while (<STDIN>) {
     next;
   }
 
-  $rest_of->{$accession} = [ $Source,$Organism,$Strain,$Level,$Status,$Date,@Etc ];
+  # everything but $Accession
+  $rest_of->{$accession} = [@fields[1 .. $#fields]];
 
   my $SafeStrain = $Strain;
   if ( defined($SafeStrain) && $opt_a ) {
@@ -174,6 +184,27 @@ while (<STDIN>) {
 
   # note submission date
   $date_of->{$accession} = $Date;
+
+  if ($Category eq "") {
+    # nop
+  } elsif ($Category eq "representative genome") {
+    $is_repr->{$accession} = "R";
+  } else {
+    die "Category=<<$Category>>,";
+  }
+
+  if ($TypeCode eq "") {
+    # nop
+  } elsif ($TypeCode eq "PATHOVAR_TYPE") {
+    $is_type->{$accession} = "P";
+  } elsif ($TypeCode eq "TYPE_MATERIAL") {
+    $is_type->{$accession} = "T";
+  } elsif ($TypeCode eq "TYPE_MATERIAL_SYN") {
+    $is_type->{$accession} = "S";
+  } else {
+    die "TypeCode=<<$TypeCode>>,";
+  }
+
 }
 
 # ------------------------------------------------------------------------
@@ -270,6 +301,14 @@ foreach my $accession (sort (keys %{$final_name_of})) {
   my $name = $final_name_of->{$accession};
   (!$done->{$name}) || die;
   $done->{$name} = TRUE;
+
+  my @prefixes;
+  if ($opt_t && defined($is_type->{$accession})) { push @prefixes, $is_type->{$accession}; }
+  if ($opt_r && defined($is_repr->{$accession})) { push @prefixes, $is_repr->{$accession}; }
+  if ( scalar(@prefixes) > 0 ) {
+    $name = "<".join(",",@prefixes).">" . $name;
+  }
+
   print join("\t",$name,$accession,$rest_of->{$accession}->@*),"\n";
 }
 
