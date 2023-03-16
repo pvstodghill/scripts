@@ -306,7 +306,7 @@ foreach my $accession (sort (keys %{$final_name_of})) {
   if ($opt_t && defined($is_type->{$accession})) { push @prefixes, $is_type->{$accession}; }
   if ($opt_r && defined($is_repr->{$accession})) { push @prefixes, $is_repr->{$accession}; }
   if ( scalar(@prefixes) > 0 ) {
-    $name = "<".join(",",@prefixes).">" . $name;
+    $name = join("",@prefixes)."__" . $name;
   }
 
   print join("\t",$name,$accession,$rest_of->{$accession}->@*),"\n";
