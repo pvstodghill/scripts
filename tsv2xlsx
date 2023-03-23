@@ -46,7 +46,7 @@ if ( scalar(@ARGV) == 0 ) {
   push @ARGV, "/dev/stdin";
 }
 
-(!$opt_H) || die "-H not implemented,";
+#(!$opt_H) || die "-H not implemented,";
 
 my $outfile = $opt_o;
 my $workbook = Excel::Writer::XLSX->new($outfile);
@@ -75,7 +75,12 @@ sub process_file {
 
   my $parser = Text::CSV::Simple->new({sep_char => "\t", quote_char => undef});
   my @data = $parser->read_file($infile);
-  my $headers = shift @data;
+  my $headers;
+  if ($opt_H) {
+    $headers = [];
+  } else {
+    $headers = shift @data;
+  }
   import_data($workbook, $title, $headers, [@data]);
 }
 
