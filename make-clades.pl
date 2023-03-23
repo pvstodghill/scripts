@@ -188,11 +188,18 @@ sub read_fastani {
       next;
     }
 
+    my $tag;
     if ( $a lt $b ) {
-      $edges->{"$a&&&$b"} = TRUE;
+      $tag = "$a&&&$b";
     } else {
-      $edges->{"$b&&&$a"} = TRUE;
+      $tag = "$b&&&$a";
     }
+
+    my $l = $edges->{$tag};
+    if (!defined($l)) {
+      $l = $edges->{$tag} = [];
+    }
+    push $l->@*, $score;
 
     uf_union($uf,$a,$b);
   }
@@ -241,11 +248,18 @@ sub read_pyani {
 	next;
       }
 
+      my $tag;
       if ( $a lt $b ) {
-	$edges->{"$a&&&$b"} = TRUE;
+	$tag = "$a&&&$b";
       } else {
-	$edges->{"$b&&&$a"} = TRUE;
+	$tag = "$b&&&$a";
       }
+
+      my $l = $edges->{$tag};
+      if (!defined($l)) {
+	$l = $edges->{$tag} = [];
+      }
+      push $l->@*, $score;
 
       uf_union($uf,$a,$b);
     }
@@ -253,8 +267,6 @@ sub read_pyani {
 
   return ($nodes,$edges,$uf);
 }
-
-
 
 # ------------------------------------------------------------------------
 
@@ -321,7 +333,24 @@ foreach my $color (sort { $clade_names->{$a} cmp $clade_names->{$b} } (keys($cla
 
 # ------------------------------------------------------------------------
 
+sub min {
+  my ($x,$y) = @_;
+  if (!defined($x)) {
+    return $y;
+  } elsif (!defined($y)) {
+    return $x;
+  } elsif ($x < $y) {
+    return $x;
+  } else {
+    return $y;
+  }
+}
+
+# ------------------------------------------------------------------------
+
 if (!$opt_d) { exit; }
+
+# dot language ref: https://graphviz.org/doc/info/lang.html
 
 open(my $out_fh, ">", $opt_d) || die "Cannot open for writing: <<$opt_d>>,\n";
 
@@ -330,7 +359,9 @@ print $out_fh "strict graph {\n";
 foreach my $edge ( sort {$a cmp $b} (keys($edges->%*)) ) {
 
   my ($a,$b) = split(/&&&/,$edge);
-  print $out_fh "$a -- $b [color=\"black\"]\n";
+  my @scores = $edges->{$edge}->@*;
+  my $weight = sprintf("%.2f",min(@scores));
+  print $out_fh "$a -- $b [color=\"black\",weight=$weight]\n";
 
 }
 
