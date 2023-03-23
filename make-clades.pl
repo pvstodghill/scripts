@@ -120,6 +120,39 @@ sub uf_union {
 
 # ------------------------------------------------------------------------
 
+sub is_T {
+  my ($s) = @_;
+  if ( $s =~ /^T__/ ) {
+    return TRUE;
+  } elsif ( $s =~ /\(T\)$/ ) {
+    return TRUE;
+  } else {
+    return FALSE;
+  }
+}
+
+sub is_TR {
+  my ($s) = @_;
+  if ( $s =~ /^TR__/ ) {
+    return TRUE;
+  } elsif ( $s =~ /\(T,R\)$/ ) {
+    return TRUE;
+  } else {
+    return FALSE;
+  }
+}
+
+sub is_R {
+  my ($s) = @_;
+  if ( $s =~ /^R__/ ) {
+    return TRUE;
+  } elsif ( $s =~ /\(R\)$/ ) {
+    return TRUE;
+  } else {
+    return FALSE;
+  }
+}
+
 sub fix_name {
   my ($s) = @_;
   $s =~ s/^TR__(.*)/$1(T,R)/;
@@ -127,7 +160,6 @@ sub fix_name {
   $s =~ s/^R__(.*)/$1(R)/;
   return $s;
 }
-
 
 # ------------------------------------------------------------------------
 
@@ -143,8 +175,8 @@ sub read_fastani {
     chomp;
     my ($a,$b,$score,@rest) = split("\t");
 
-    $a = fix_name($a);
-    $b = fix_name($b);
+    # $a = fix_name($a);
+    # $b = fix_name($b);
 
     $nodes->{$a} = TRUE;
     $nodes->{$b} = TRUE;
@@ -188,7 +220,7 @@ sub read_pyani {
       @col_names = @fields;
       for (my $j=0; $j<=$#col_names; $j++) {
 	my $name = $col_names[$j];
-	$name = fix_name($name);
+	# $name = fix_name($name);
 	$nodes->{$name} = TRUE;
 	$col_names[$j] = $name;
       }
@@ -196,7 +228,7 @@ sub read_pyani {
     }
 
     my ($a,@col_values) = @fields;
-    $a = fix_name($a);
+    # $a = fix_name($a);
 
     for (my $j=0; $j<=$#col_values; $j++) {
       my $b = $col_names[$j];
@@ -258,10 +290,7 @@ my $num_unnamed=0;
 foreach my $color ( keys($clade_members->%*) ) {
   my @types;
   foreach my $member ( $clade_members->{$color}->@* ) {
-    if ( $member =~ /\(T\)$/ ) {
-      push @types, $member;
-      $suppress_member->{$member} = TRUE;
-    } elsif ( $member =~ /\(T,R\)$/ ) {
+    if ( is_T($member) || is_TR($member) ) {
       push @types, $member;
       $suppress_member->{$member} = TRUE;
     }
@@ -309,12 +338,12 @@ print $out_fh "\n";
 
 foreach my $node ( sort {$a cmp $b} (keys($nodes->%*)) ) {
 
-  my @attrs = "label=\"$node\"";
-  if ($node =~ /\(T\)$/) {
+  my @attrs = sprintf("label=\"%s\"",fix_name($node));
+  if (is_T($node)) {
     push @attrs, "color=\"green\"";
-  } elsif ($node =~ /\(R\)$/) {
+  } elsif (is_R($node)) {
     push @attrs, "color=\"red\"";
-  } elsif ($node =~ /^\(T,R\)$/) {
+  } elsif (is_TR($node)) {
     push @attrs, "color=\"yellow\"";
   }
 
