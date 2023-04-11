@@ -6,6 +6,8 @@ use warnings FATAL => 'all';
 no warnings "experimental::postderef";
 #use Carp::Always;
 
+use File::Basename;
+
 # use FindBin;
 # use lib "$FindBin::Bin";
 # use Xyzzy;
@@ -21,30 +23,37 @@ binmode(STDOUT, ":utf8");
 use File::Basename;
 use Getopt::Std;
 
+our $opt_A;
 our $opt_F;
 our $opt_M;
 our $opt_c = 95.0;
 our $opt_d;
 our $opt_h;
+our $opt_s;
+our $opt_t;
 
 my $usage_str = "";
 my $progname = basename($0);
 $usage_str .= "Usage: $progname [options]\n";
 
+$usage_str .= "-A MASH.out - raw Mash output\n";
 $usage_str .= "-F FASTANI.txt - FastANI formatted input\n";
 $usage_str .= "-M MATRIX.txt - Matrix formatted input\n";
 $usage_str .= "-c CUTOFF - cutoff for clade equivalence [$opt_c]\n";
 $usage_str .= "-d OUTPUT.dot - graph of clades\n";
 $usage_str .= "-h - print help\n";
+$usage_str .= "-s - don't print singletons\n";
+$usage_str .= "-t - output tsv\n";
+
 $usage_str .= "\n";
-$usage_str .= "exactly one required: -F -M\n";
+$usage_str .= "exactly one required: -A -F -M\n";
 
 sub usage {
   print STDERR $usage_str;
   exit(@_);
 }
 
-my $stat = getopts('F:M:c:d:h');
+my $stat = getopts('A:F:M:c:d:hts');
 if (!$stat) {
   usage(1);
 }
@@ -54,7 +63,10 @@ if ($opt_h) {
 if (scalar(@ARGV) != 0) {
   usage(1);
 }
-if (!$opt_F && !$opt_M) {
+if ((defined($opt_A) ? 1 : 0)
+    + (defined($opt_F) ? 1 : 0)
+    + (defined($opt_M) ? 1 : 0)
+    != 1) {
   usage(1);
 }
 
@@ -159,6 +171,54 @@ sub fix_name {
   $s =~ s/^T__(.*)/$1(T)/;
   $s =~ s/^R__(.*)/$1(R)/;
   return $s;
+}
+
+# ------------------------------------------------------------------------
+
+sub read_mash {
+  my ($filename) = @_;
+
+  my $nodes = {};
+  my $edges = {};
+  my $uf = uf_create();
+
+  open(my $in_fh, "<", $filename) || die "Cannot open for reading: <<$filename>>,";
+  while (<$in_fh>) {
+    chomp;
+    my ($a,$b,$score,@rest) = split("\t");
+
+    $a = basename($a,".fna",".fasta");
+    $b = basename($b,".fna",".fasta");
+    # $a = fix_name($a);
+    # $b = fix_name($b);
+
+    $nodes->{$a} = TRUE;
+    $nodes->{$b} = TRUE;
+
+    if ( $a eq $b ) {
+      next;
+    }
+    if ( $score > $opt_c ) {
+      next;
+    }
+
+    my $tag;
+    if ( $a lt $b ) {
+      $tag = "$a&&&$b";
+    } else {
+      $tag = "$b&&&$a";
+    }
+
+    my $l = $edges->{$tag};
+    if (!defined($l)) {
+      $l = $edges->{$tag} = [];
+    }
+    push $l->@*, $score;
+
+    uf_union($uf,$a,$b);
+  }
+
+  return ($nodes,$edges,$uf);
 }
 
 # ------------------------------------------------------------------------
@@ -272,7 +332,9 @@ sub read_pyani {
 
 my ($nodes,$edges,$uf);
 
-if ( $opt_F ) {
+if ( $opt_A ) {
+  ($nodes,$edges,$uf) = read_mash($opt_A);
+} elsif ( $opt_F ) {
   ($nodes,$edges,$uf) = read_fastani($opt_F);
 } elsif ( $opt_M ) {
   ($nodes,$edges,$uf) = read_pyani($opt_M);
@@ -309,27 +371,49 @@ foreach my $color ( keys($clade_members->%*) ) {
   }
   if (scalar(@types) == 0) {
     $num_unnamed++;
-    $clade_names->{$color} = sprintf("~Unnamed #%d",$num_unnamed);
+    $clade_names->{$color} = sprintf("~%06d",$num_unnamed);
   } else {
     $clade_names->{$color} = join(", ", sort {$a cmp $b} @types);
   }
 }
 
+my $num_colors = 0;
+
 foreach my $color (sort { $clade_names->{$a} cmp $clade_names->{$b} } (keys($clade_names->%*))) {
   my $name = $clade_names->{$color};
-  $name =~ s/^~//;
-  print "### $name\n\n";
   my @members = $clade_members->{$color}->@*;
-  my $skip = FALSE;
-  foreach my $member ( sort {$a cmp $b} @members ) {
-    if ($suppress_member->{$member}) { next; }
-    print " - $member\n";
-    $skip = TRUE;
+
+  if ($opt_s && scalar(@members) == 1) { next; }
+
+  if ( $opt_t ) {
+
+    foreach my $member ( sort {$a cmp $b} @members ) {
+      print join("\t",$num_colors,$member),"\n";
+    }
+
+  } else {
+
+    if ( $name =~ /^~0*([0-9]+)$/ ) {
+      $name = "Unnamed #$1";
+    }
+    print "### $name\n\n";
+    my $skip = FALSE;
+    foreach my $member ( sort {$a cmp $b} @members ) {
+      if ($suppress_member->{$member}) {
+	next;
+      }
+      print " - $member\n";
+      $skip = TRUE;
+    }
+    if ($skip) {
+      print "\n";
+    }
   }
-  if ($skip) {
-    print "\n";
-  }
+
+  $num_colors++;
+
 }
+
 
 # ------------------------------------------------------------------------
 
