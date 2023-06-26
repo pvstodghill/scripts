@@ -70,7 +70,14 @@ while (<STDIN>) {
     if ($opt_v) {
       $name =~ s/\.[0-9]+$//;
     }
-    my $filename = join('',$opt_d,$name,$opt_x);
+
+    my $safe_name = $name;
+    $safe_name =~ s|[:/]+|__|g;
+    if ( $name ne $safe_name ) {
+      print STDERR "# Replacing \"$name\" with \"$safe_name\"\n";
+    }
+
+    my $filename = join('',$opt_d,$safe_name,$opt_x);
     open($fh,">",$filename) || die "cannot open for writing <<$filename>>,"
   }
   (defined($fh)) || die;
