@@ -19,17 +19,19 @@ function usage {
     echo 1>&2 "-g - only run against GTDB"
     echo 1>&2 "-h - this message"
     echo 1>&2 "-r - only run against RefSeq"
+    echo 1>&2 "-u - unfiltered results"
 
     exit "$@"
 }    
 
-while getopts 'a:ghr' opt ; do
+while getopts 'a:ghru' opt ; do
     case "$opt" in
 
 	a) opt_a="--ani $OPTARG" ;;
 	h) opt_h=1 ;;
 	g) opt_g=1 ;;
 	r) opt_r=1 ;;
+	u) opt_u="--unfiltered" ;;
 
 	\?) usage 1 ;;
 	*) echo 1>&2 "Can't happen" ; exit 1 ;;
@@ -66,7 +68,7 @@ if [ "$opt_r" ] ; then
     echo 1>&2 '### Refseq'
     (
 	set -x
-	referenceseeker $opt_a ./bacteria-refseq ./temp/genome.fasta
+	referenceseeker $opt_a $opt_u ./bacteria-refseq ./temp/genome.fasta
     )
 fi
 
@@ -74,6 +76,6 @@ if [ "$opt_g" ] ; then
     echo 1>&2 '### GTDB'
     (
 	set -x
-	referenceseeker $opt_a ./bacteria-gtdb ./temp/genome.fasta
+	referenceseeker $opt_a $opt_u ./bacteria-gtdb ./temp/genome.fasta
     )
 fi
