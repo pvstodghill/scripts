@@ -57,6 +57,8 @@ my $gff3 = FALSE;
 
 my %seqnames;
 
+my $found_fasta = FALSE;
+
 while (<STDIN>) {
   chomp;
   $_ =~ s/\r+//;
@@ -65,21 +67,13 @@ while (<STDIN>) {
       $gff3 = TRUE;
     }
     if ( $_ eq "##FASTA" ) {
+      $found_fasta = TRUE;
       last;
     }
     next;
   }
     my ($seqname,$source,$feature,$start,$end,
 	$score,$strand,$frame,$attributes) = split(/\t/,$_);
-  if ( $opt_n ) {
-    $seqname =~ s/\.[0-9]+$//;
-  }
-  if ( $seqname =~ /\|/ ) {
-    my ($db,$accession,$extra) = split(/[|]/,$seqname);
-    ($db eq "lcl" || $db eq "gb") || die "[1]cannot parse seqname=<<$seqname>>,";
-    ($extra eq "") || die "[2]cannot parse seqname=<<$seqname>>,";
-    $seqname = $accession;
-  }
 
   if (!defined($seqname)) {
     $seqnames{$seqname} = [];
@@ -101,9 +95,58 @@ while (<STDIN>) {
 
 # ------------------------------------------------------------------------
 
+my %seqs;
+
+if ( $found_fasta ) {
+
+  my $seqname;
+  my $sequence = "";
+
+  while (<STDIN>) {
+    chomp;
+    $_ =~ s/\r+//;
+    if ( /^>([^ ]*)/ ) {
+      if ($sequence ne "") {
+	$seqs{$seqname} = $sequence;
+      }
+      $seqname = $1;
+      $sequence = "";
+    } else {
+      $sequence .= $_ . "\n";
+    }
+
+  }
+
+  if ($sequence ne "") {
+    $seqs{$seqname} = $sequence;
+  }
+
+
+}
+
+
+# ------------------------------------------------------------------------
+
 foreach my $seqname ( keys %seqnames ) {
-  my $out_name =  $opt_d."/".$seqname.$tag.".gff";
-  open(my $fh, ">", $out_name) || die "Cannot open for writing <<$out_name>>,";
+
+  my $out_name = $seqname;
+  if ( $opt_n ) {
+    $out_name =~ s/\.[0-9]+$//;
+  }
+  if ( $out_name =~ /\|/ ) {
+    my ($db,$accession,$extra) = split(/[|]/,$out_name);
+    if ( $db eq "gnl" && $accession eq "Prokka" ) {
+      ($db,$accession,$extra) = ("gnl|Prokka",$extra,"");
+    } else {
+      ($db eq "lcl" || $db eq "gb") || die "[1]cannot parse seqname=<<$out_name>>,";
+    }
+    ($extra eq "") || die "[2]cannot parse seqname=<<$out_name>>,";
+    $out_name = $accession;
+  }
+
+  my $out_file =  $opt_d."/".$out_name.$tag.".gff";
+  open(my $fh, ">", $out_file) || die "Cannot open for writing <<$out_file>>,";
+
   if ( $gff3 ) {
     print $fh "##gff-version 3\n";
   }
@@ -124,6 +167,11 @@ foreach my $seqname ( keys %seqnames ) {
     print $fh join("\t", $e->{seqname},$e->{source},$e->{feature},
 		 $e->{start},$e->{end},$e->{score},$e->{strand},
 		 $e->{frame},$e->{attributes}),"\n";
+  }
+  if (defined($seqs{$seqname})) {
+    print $fh "##FASTA\n";
+    print $fh ">$seqname\n";
+    print $fh $seqs{$seqname};
   }
   close $fh;
 }

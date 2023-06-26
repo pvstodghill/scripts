@@ -19,7 +19,7 @@ function usage {
     echo 1>&2 "-k - keep temporary files"
     echo 1>&2 "-n - fake execution"
     echo 1>&2 "-o OUT_DIR - Output directory [$OUT_DIR]"
-    echo 1>&2 "-p PGAP_DIR - Directory containing PGAP. Will download if not specified."
+    echo 1>&2 "-p PGAP_INPUT_DIR - Directory containing PGAP. Will download if not specified."
     echo 1>&2 "-s SUBMOL_YAML - submol.yaml to use instead of generated"
     echo 1>&2 "-t TAXON_ID - taxon id for species"
     echo 1>&2 "-u - update PGAP before running"
@@ -41,7 +41,7 @@ while getopts 'S:V:Ufhkno:p:s:t:u' opt ; do
 	k) KEEP_FILES=1 ;;
 	n) FAKE_IT=1 ;;
 	o) OUT_DIR="$OPTARG" ;;
-	p) PGAP_DIR="$OPTARG" ;;
+	p) PGAP_INPUT_DIR="$OPTARG" ;;
 	s) SUBMOL_YAML="$OPTARG" ;;
 	t) TAXON_ID="$OPTARG" ;;
 	u) UPDATE_PGAP=1 ;;
@@ -93,19 +93,20 @@ function run_maybe {
     fi
 }
 
-if [ "$PGAP_DIR" ] ; then
-    if [ ! -e "$PGAP_DIR" ] ; then
-	echo 1>&2 "$PGAP_DIR does not exist"
+if [ "$PGAP_INPUT_DIR" ] ; then
+    if [ ! -e "$PGAP_INPUT_DIR" ] ; then
+	echo 1>&2 "$PGAP_INPUT_DIR does not exist"
 	exit 1
     fi
+    export PGAP_INPUT_DIR
 elif [ -d $HOME/scratch/pgap ] ; then
-    PGAP_DIR=$HOME/scratch/pgap
+    export PGAP_INPUT_DIR=$HOME/scratch/pgap
 else
-    PGAP_DIR=${OUT_DIR}/pgap_dist
-    echo "# Downloading PGAP to ${PGAP_DIR}"
+    export PGAP_INPUT_DIR=${OUT_DIR}/pgap_dist
+    echo "# Downloading PGAP to ${PGAP_INPUT_DIR}"
     (
-	mkdir -p ${PGAP_DIR}
-	run cd ${PGAP_DIR}
+	mkdir -p ${PGAP_INPUT_DIR}
+	run cd ${PGAP_INPUT_DIR}
 	run_maybe wget -q https://github.com/ncbi/pgap/raw/prod/scripts/pgap.py
 	run_maybe chmod +x pgap.py
 	run_maybe ./pgap.py -D ${BACKEND} --update --taxcheck
@@ -117,7 +118,7 @@ fi
 
 if [ "$UPDATE_PGAP" ] ; then
     (
-	run	cd ${PGAP_DIR}
+	run	cd ${PGAP_INPUT_DIR}
 	run_maybe rm -f pgap.py
 	run_maybe wget -q https://github.com/ncbi/pgap/raw/prod/scripts/pgap.py
 	run_maybe chmod +x pgap.py
@@ -130,16 +131,16 @@ fi
 
 # ------------------------------------------------------------------------
 
-if [ -e "${PGAP_DIR}/temp" -a -z "$FORCE" ] ; then
-    echo 1>&2 "${PGAP_DIR}/temp already exists"
+if [ -e "${PGAP_INPUT_DIR}/temp" -a -z "$FORCE" ] ; then
+    echo 1>&2 "${PGAP_INPUT_DIR}/temp already exists"
     exit 1
 fi
 
-rm -rf ${PGAP_DIR}/temp
-mkdir -p ${PGAP_DIR}/temp/input
+rm -rf ${PGAP_INPUT_DIR}/temp
+mkdir -p ${PGAP_INPUT_DIR}/temp/input
 
 while [ -n "$1" -a x"$1"x != x--x ] ; do
-    cat "$1" >> ${PGAP_DIR}/temp/input/genome.fna
+    cat "$1" >> ${PGAP_INPUT_DIR}/temp/input/genome.fna
     shift 1
 done
 if [ x"$1"x == x--x ] ; then
@@ -166,7 +167,7 @@ function get_species {
 
 
 if [ "$SUBMOL_YAML" ] ; then
-    cp --archive "$SUBMOL_YAML" ${PGAP_DIR}/temp/input/submol.yaml
+    cp --archive "$SUBMOL_YAML" ${PGAP_INPUT_DIR}/temp/input/submol.yaml
 elif [ "$TAXON_ID" ] ; then
     SPECIES_NAME="$(get_species "$TAXON_ID")"
     if [ $? != 0 ] ; then
@@ -176,12 +177,12 @@ elif [ "$TAXON_ID" ] ; then
 	| sed -e 's/%%SPECIES%%/'"$SPECIES_NAME"'/g' \
 	| sed -e 's/%%STRAIN%%/'"$STRAIN_NAME"'/g' \
 	| sed -e 's/%%VERSION%%/'"$VERSION"'/g' \
-	      > ${PGAP_DIR}/temp/input/submol.yaml
+	      > ${PGAP_INPUT_DIR}/temp/input/submol.yaml
 fi
 
 # ------------------------------------------------------------------------
 
-cat <<EOF > ${PGAP_DIR}/temp/input/input.yaml
+cat <<EOF > ${PGAP_INPUT_DIR}/temp/input/input.yaml
 fasta:
   class: File
   location: genome.fna
@@ -194,7 +195,7 @@ EOF
 # ------------------------------------------------------------------------
 
 (
-    run	cd ${PGAP_DIR}
+    run	cd ${PGAP_INPUT_DIR}
     ulimit -n 8192
     (
 	set +e # keep going even if pgap.py fails
@@ -227,15 +228,15 @@ EOF
 
 # ------------------------------------------------------------------------
 
-if [ ! -e ${PGAP_DIR}/temp/output/annot.gbk ] ; then
+if [ ! -e ${PGAP_INPUT_DIR}/temp/output/annot.gbk ] ; then
     echo 2>&1 '# ***********************'
     echo 2>&1 '# * !!! PGAP Failed !!! *'
     echo 2>&1 '# ***********************'
     echo 2>&1 '#'
-    echo 2>&1 '# Output can be found:' ${PGAP_DIR}/temp/output
-    if [ -e ${PGAP_DIR}/temp/output/calls.tab ] ; then
-	echo 2>&1 '# Head of:' ${PGAP_DIR}/temp/output/calls.tab
-	head ${PGAP_DIR}/temp/output/calls.tab
+    echo 2>&1 '# Output can be found:' ${PGAP_INPUT_DIR}/temp/output
+    if [ -e ${PGAP_INPUT_DIR}/temp/output/calls.tab ] ; then
+	echo 2>&1 '# Head of:' ${PGAP_INPUT_DIR}/temp/output/calls.tab
+	head ${PGAP_INPUT_DIR}/temp/output/calls.tab
     fi
     exit 1
 fi
@@ -243,15 +244,15 @@ fi
 # ------------------------------------------------------------------------
 
 mkdir -p ${OUT_DIR}
-cp --archive ${PGAP_DIR}/temp/output/* ${OUT_DIR}
-cp --archive ${PGAP_DIR}/temp/input/input.yaml ${OUT_DIR}
+cp --archive ${PGAP_INPUT_DIR}/temp/output/* ${OUT_DIR}
+cp --archive ${PGAP_INPUT_DIR}/temp/input/input.yaml ${OUT_DIR}
 
 if [ -z "$KEEP_FILES" ] ; then
     (
 	set +e
 	# set -x
-	chmod -R u+w ${PGAP_DIR}/temp
-	rm -rf ${PGAP_DIR}/temp
+	chmod -R u+w ${PGAP_INPUT_DIR}/temp
+	rm -rf ${PGAP_INPUT_DIR}/temp
     )
 fi
 
