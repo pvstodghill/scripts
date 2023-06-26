@@ -91,7 +91,7 @@ sub process_entry {
 
   my $assembly_level = $assembly_info->{assemblyLevel} || $assembly_info->{assembly_level};
   my $assembly_status = $assembly_info->{assemblyStatus} || $assembly_info->{assembly_status};
-  my $submission_date = $assembly_info->{submissionDate} || $assembly_info->{submission_date};
+  my $release_date = $assembly_info->{releaseDate} || $assembly_info->{release_date};
   my $representative = "";
   if (defined($assembly_info->{refseqCategory})) {
     $representative = $assembly_info->{refseqCategory};
@@ -113,7 +113,7 @@ sub process_entry {
     $headered = TRUE;
   }
 
-  print join("\t",$accession,$source,$organismName,$strain,$assembly_level,$assembly_status,$submission_date,
+  print join("\t",$accession,$source,$organismName,$strain,$assembly_level,$assembly_status,$release_date,
 	    $representative,$type_info),"\n";
 
 }
