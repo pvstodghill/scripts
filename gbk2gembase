@@ -181,7 +181,7 @@ my $parsing_features = FALSE;
 while (<STDIN>) {
   if ( $_ =~ /^LOCUS +([^ ]+)/ ) {
     $accession = $1;
-    print STDERR "## $accession\n";
+    #print STDERR "## $accession\n";
     next;
   } elsif ( $_ =~ /^FEATURES    / ) {
     $parsing_features = TRUE;
