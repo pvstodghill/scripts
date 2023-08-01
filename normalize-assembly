@@ -15,18 +15,20 @@ function usage {
     echo 1>&2 "-d DIR - work dir [$_opt_d]"
     echo 1>&2 "-f FIRST.faa - first proteins library"
     echo 1>&2 "-h - this message"
+    echo 1>&2 "-l NAME1,NAME2 - non-circular (linear) contigs"
 
     exit "$@"
 }    
 
 opt_d="$_opt_d"
 
-while getopts 'd:f:h' opt ; do
+while getopts 'd:f:l:h' opt ; do
     case "$opt" in
 
 	d) opt_d="$OPTARG" ;;
 	f) opt_f="$OPTARG" ;;
 	h) opt_h=1 ;;
+	l) opt_l="$OPTARG" ;;
 
 	\?) usage 1 ;;
 	*) echo "Can't happen" ; exit 1 ;;
@@ -105,9 +107,13 @@ echo 1>&2 ''
 
 CMDS="$WORKDIR"/__cmds__
 
+if [ "$opt_l" ] ; then
+    opt_l="-l $opt_l"
+fi
+
 (
     set -x
-    "$PROGDIR"/$PROGNAME.pl "$WORKDIR" "$PROTEOME".gff "$FIRSTS".blast "$BEST_BREAKS".txt .orig.fasta .fasta > $CMDS.bash
+    "$PROGDIR"/$PROGNAME.pl $opt_l "$WORKDIR" "$PROTEOME".gff "$FIRSTS".blast "$BEST_BREAKS".txt .orig.fasta .fasta > $CMDS.bash
 )
 echo 1>&2 ''
 

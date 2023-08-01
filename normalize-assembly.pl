@@ -18,17 +18,19 @@ use File::Basename;
 use Getopt::Std;
 
 our $opt_h;
+our $opt_l = "";
 our $opt_v;
 
 sub usage {
   my $progname = basename($0);
   print STDERR "Usage: $progname [options] ...\n";
   print STDERR "-h - print help\n";
+  print STDERR "-l NAME1,NAME2 - non-circular (linear) contigs\n";
   print STDERR "-v - verbose\n";
   exit(@_);
 }
 
-my $stat = getopts('hv');
+my $stat = getopts('hl:v');
 if (!$stat) {
   usage(1);
 }
@@ -132,14 +134,30 @@ close $fh;
 
 # ------------------------------------------------------------------------
 
+my $is_linear = {};
+
+foreach my $name ( split(/, */,$opt_l) ) {
+  $is_linear->{$name} = TRUE;
+}
+
+# ------------------------------------------------------------------------
+
 my @new_fastas;
 
 use File::Basename;
 foreach my $orig_fasta ( sort (<$workdir/*$orig_suffix>) ) {
   my $accession = basename($orig_fasta,$orig_suffix);
   my $new_fasta = "$workdir/$accession$new_suffix";
+  push @new_fastas, $new_fasta;
+
   if ($opt_v) {
     print STDERR "# $accession\n";
+  }
+
+  if ( $is_linear->{$accession} ) {
+    print STDERR "## linear. skipping\n";
+    print "cp $orig_fasta  $new_fasta\n";
+    next;
   }
 
   my ($pos,$strand);
@@ -174,7 +192,6 @@ foreach my $orig_fasta ( sort (<$workdir/*$orig_suffix>) ) {
   }
 
   print "$PROGDIR/reindex-fasta $strand $pos $orig_fasta > $new_fasta\n";
-  push @new_fastas, $new_fasta;
 }
 
 print "cat ",join(" ",@new_fastas),"\n";
