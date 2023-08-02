@@ -1,0 +1,136 @@
+#! /usr/bin/env perl
+
+use strict;
+use feature 'postderef';
+use warnings FATAL => 'all';
+no warnings "experimental::postderef";
+#use Carp::Always;
+
+# use FindBin;
+# use lib "$FindBin::Bin";
+# use Xyzzy;
+
+use constant { TRUE => 1, FALSE => 0 };
+
+# 'wide character' warning.
+binmode(STDIN, ":utf8");
+binmode(STDOUT, ":utf8");
+
+my $data = {};
+
+my @header;
+
+while (<STDIN>) {
+  if (/^#/) { next; }
+  chomp;
+  my ($replicon,@fields) = split(/\t/);
+  if ($replicon eq "replicon") {
+    @header = @fields;
+    next;
+  }
+  my $results = {};
+  for (my $i=0; $i<scalar(@fields); $i++) {
+    my $v = $fields[$i];
+    if ($v eq "0") { next; }
+    my $k = $header[$i];
+    $results->{$k} = $v;
+  }
+  if (scalar(keys($results->%*)) > 0) {
+    $data->{$replicon} = $results;
+  }
+}
+
+# ------------------------------------------------------------------------
+
+my $col_names = {};
+
+foreach my $replicon ( sort(keys($data->%*)) ) {
+  my $results = $data->{$replicon};
+  foreach my $k ( keys($results->%*) ) {
+    $col_names->{$k} = TRUE;
+  }
+}
+
+my @col_names = sort(keys($col_names->%*));
+
+print join("\t","replicon",@col_names),"\n";
+foreach my $replicon ( sort(keys($data->%*)) ) {
+  my @row = ($replicon);
+  my $results = $data->{$replicon};
+  foreach my $k ( @col_names ) {
+    my $v = $results->{$k};
+    if (!defined($v)) { $v = ""; }
+    push @row,$v;
+  }
+  print join("\t",@row),"\n";
+}
+
+# ------------------------------------------------------------------------
+
+exit;
+
+# ------------------------------------------------------------------------
+
+
+my $num_rows =scalar(${data}->@*);
+my $num_cols =scalar(${data}->[0]->@*);
+
+my @print_row;
+for (my $i=0; $i<$num_rows; $i++) {
+  push @print_row, FALSE;
+}
+
+my @print_col;
+for (my $j=0; $j<$num_cols; $j++) {
+  push @print_col, FALSE;
+}
+
+for (my $i=1; $i<$num_rows; $i++) {
+  for (my $j=1; $j<$num_cols; $j++) {
+    my $v = $data->[$i]->[$j];
+    if (!defined($v)) {
+      die "<<$i>><<$j>>\n";
+    }
+    if ($v ne "0") {
+      $print_row[$i] = TRUE;
+      $print_col[$j] = TRUE;
+    }
+  }
+}
+
+my $num_print_rows = 0;
+for (my $i=0; $i<$num_rows; $i++) {
+  if ($print_row[$i]) {
+    $num_print_rows++;
+  }
+}
+
+my $num_print_cols = 0;
+for (my $j=0; $j<$num_cols; $j++) {
+  if ($print_row[$j]) {
+    $num_print_cols++;
+  }
+}
+
+if ( $num_print_rows == 0 || $num_print_cols == 0 ) {
+  ( $num_print_rows == 0 && $num_print_cols == 0 ) || die;
+  exit;
+}
+
+$print_row[0] = TRUE;
+$print_col[0] = TRUE;
+
+
+for (my $i=0; $i<$num_rows; $i++) {
+  if (!$print_row[$i]) {
+    next;
+  }
+  my @line;
+  for (my $j=0; $j<$num_cols; $j++) {
+    if (!$print_col[$j]) {
+      next;
+    }
+    push @line,$data->[$i]->[$j];
+  }
+  print join("\t",@line),"\n";
+}
