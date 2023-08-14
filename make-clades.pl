@@ -26,6 +26,7 @@ use Getopt::Std;
 our $opt_A;
 our $opt_F;
 our $opt_M;
+our $opt_L;
 our $opt_c = 95.0;
 our $opt_d;
 our $opt_h;
@@ -39,6 +40,7 @@ $usage_str .= "Usage: $progname [options]\n";
 $usage_str .= "-A MASH.out - raw Mash output\n";
 $usage_str .= "-F FASTANI.txt - FastANI formatted input\n";
 $usage_str .= "-M MATRIX.txt - Matrix formatted input\n";
+$usage_str .= "-L LENS - replicon lengths\n";
 $usage_str .= "-c CUTOFF - cutoff for clade equivalence [$opt_c]\n";
 $usage_str .= "-d OUTPUT.dot - graph of clades\n";
 $usage_str .= "-h - print help\n";
@@ -53,7 +55,7 @@ sub usage {
   exit(@_);
 }
 
-my $stat = getopts('A:F:M:c:d:hts');
+my $stat = getopts('A:F:M:L:c:d:hts');
 if (!$stat) {
   usage(1);
 }
@@ -344,6 +346,21 @@ if ( $opt_A ) {
 
 # ------------------------------------------------------------------------
 
+my $replicon_lengths = {};
+
+if ( $opt_L ) {
+  open(my $len_fh,"<",$opt_L) || die "Cannot open: <<$opt_L>>,";
+  while (<$len_fh>) {
+    chomp;
+    my ($replicon_name,$replicon_length) = split(/\t/);
+    (!defined($replicon_lengths->{$replicon_name})) || die;
+    $replicon_lengths->{$replicon_name} = $replicon_length;
+  }
+  close $len_fh;
+}
+
+# ------------------------------------------------------------------------
+
 my $clade_names = {};
 my $clade_members = {};
 
@@ -388,7 +405,12 @@ foreach my $color (sort { $clade_names->{$a} cmp $clade_names->{$b} } (keys($cla
   if ( $opt_t ) {
 
     foreach my $member ( sort {$a cmp $b} @members ) {
-      print join("\t",$num_colors,$member),"\n";
+      my $len = $replicon_lengths->{$member};
+      if (defined($len)) {
+	print join("\t",$num_colors,$member,$len),"\n";
+      } else {
+	print join("\t",$num_colors,$member),"\n";
+      }
     }
 
   } else {
@@ -402,7 +424,12 @@ foreach my $color (sort { $clade_names->{$a} cmp $clade_names->{$b} } (keys($cla
       if ($suppress_member->{$member}) {
 	next;
       }
-      print " - $member\n";
+      my $len = $replicon_lengths->{$member};
+      if (defined($len)) {
+	print " - $member [$len]\n";
+      } else {
+	print " - $member\n";
+      }
       $skip = TRUE;
     }
     if ($skip) {
