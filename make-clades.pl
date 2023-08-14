@@ -361,11 +361,7 @@ if ( $opt_L ) {
 
 # ------------------------------------------------------------------------
 
-my $clade_names = {};
 my $clade_members = {};
-
-my $suppress_member = {};
-
 
 foreach my $node (keys($nodes->%*)) {
   my $color = uf_find($uf,$node);
@@ -376,9 +372,44 @@ foreach my $node (keys($nodes->%*)) {
   push $members->@*, $node;
 }
 
+# ------------------------------------------------------------------------
+
+my @all_colors = keys($clade_members->%*);
+
+my $clade_size = {};
+my $clade_key = {};
+
+foreach my $color ( @all_colors ) {
+  my $len = 0;
+  my $key;
+  foreach my $member ( $clade_members->{$color}->@* ) {
+    my $n = $replicon_lengths->{$member};
+    if (defined($n)) {
+      $len += $n;
+    } else {
+      $len += 1;
+    }
+    if (!defined($key) || $member lt $key) {
+      $key = $member;
+    }
+  }
+  $clade_size->{$color} = $len;
+  $clade_key->{$color} = $key;
+}
+
+my @sorted_colors = sort {
+  $clade_size->{$b} <=> $clade_size->{$a}
+    || $clade_key->{$a} cmp $clade_key->{$b}
+  } @all_colors;
+
+# ------------------------------------------------------------------------
+
+my $clade_names = {};
+my $suppress_member = {};
+
 my $num_unnamed=0;
 
-foreach my $color ( keys($clade_members->%*) ) {
+foreach my $color ( @sorted_colors ) {
   my @types;
   foreach my $member ( $clade_members->{$color}->@* ) {
     if ( is_T($member) || is_TR($member) ) {
@@ -394,9 +425,11 @@ foreach my $color ( keys($clade_members->%*) ) {
   }
 }
 
+# ------------------------------------------------------------------------
+
 my $num_colors = 0;
 
-foreach my $color (sort { $clade_names->{$a} cmp $clade_names->{$b} } (keys($clade_names->%*))) {
+foreach my $color ( @sorted_colors ) {
   my $name = $clade_names->{$color};
   my @members = $clade_members->{$color}->@*;
 
