@@ -25,8 +25,10 @@ use Getopt::Std;
 
 our $opt_A;
 our $opt_F;
-our $opt_M;
 our $opt_L;
+our $opt_M;
+our $opt_N;
+our $opt_U = "";
 our $opt_c = 95.0;
 our $opt_d;
 our $opt_h;
@@ -39,8 +41,10 @@ $usage_str .= "Usage: $progname [options]\n";
 
 $usage_str .= "-A MASH.out - raw Mash output\n";
 $usage_str .= "-F FASTANI.txt - FastANI formatted input\n";
-$usage_str .= "-M MATRIX.txt - Matrix formatted input\n";
 $usage_str .= "-L LENS - replicon lengths\n";
+$usage_str .= "-M MATRIX.txt - Matrix formatted input\n";
+$usage_str .= "-N CLADE_NAMES.txt - tsv: REPLICON_NAME CLADE_NAME\n";
+$usage_str .= "-U TAG - prefix for unnamed clades\n";
 $usage_str .= "-c CUTOFF - cutoff for clade equivalence [$opt_c]\n";
 $usage_str .= "-d OUTPUT.dot - graph of clades\n";
 $usage_str .= "-h - print help\n";
@@ -55,7 +59,7 @@ sub usage {
   exit(@_);
 }
 
-my $stat = getopts('A:F:M:L:c:d:hts');
+my $stat = getopts('A:F:L:M:N:U:c:d:hts');
 if (!$stat) {
   usage(1);
 }
@@ -352,6 +356,7 @@ if ( $opt_L ) {
   open(my $len_fh,"<",$opt_L) || die "Cannot open: <<$opt_L>>,";
   while (<$len_fh>) {
     chomp;
+    if ($_ eq "") { next; }
     my ($replicon_name,$replicon_length) = split(/\t/);
     (!defined($replicon_lengths->{$replicon_name})) || die;
     $replicon_lengths->{$replicon_name} = $replicon_length;
@@ -361,20 +366,36 @@ if ( $opt_L ) {
 
 # ------------------------------------------------------------------------
 
-my $clade_members = {};
+my $clade_names = {};
+
+if ( $opt_N ) {
+  open(my $names_fh,"<",$opt_N) || die "Cannot open: <<$opt_N>>,";
+  while (<$names_fh>) {
+    chomp;
+    if ($_ eq "") { next; }
+    my ($replicon_name,$clade_name) = split(/\t/);
+    (!defined($clade_names->{$replicon_name})) || die;
+    $clade_names->{$replicon_name} = $clade_name;
+  }
+  close($names_fh);
+}
+
+# ------------------------------------------------------------------------
+
+my $color_members = {};
 
 foreach my $node (keys($nodes->%*)) {
   my $color = uf_find($uf,$node);
-  my $members = $clade_members->{$color};
+  my $members = $color_members->{$color};
   if (!defined($members)) {
-    $members = $clade_members->{$color} = [];
+    $members = $color_members->{$color} = [];
   }
   push $members->@*, $node;
 }
 
 # ------------------------------------------------------------------------
 
-my @all_colors = keys($clade_members->%*);
+my @all_colors = keys($color_members->%*);
 
 my $clade_size = {};
 my $clade_key = {};
@@ -382,7 +403,7 @@ my $clade_key = {};
 foreach my $color ( @all_colors ) {
   my $len = 0;
   my $key;
-  foreach my $member ( $clade_members->{$color}->@* ) {
+  foreach my $member ( $color_members->{$color}->@* ) {
     my $n = $replicon_lengths->{$member};
     if (defined($n)) {
       $len += $n;
@@ -404,25 +425,29 @@ my @sorted_colors = sort {
 
 # ------------------------------------------------------------------------
 
-my $clade_names = {};
-my $suppress_member = {};
-
+my $color_names = {};
 my $num_unnamed=0;
 
 foreach my $color ( @sorted_colors ) {
-  my @types;
-  foreach my $member ( $clade_members->{$color}->@* ) {
-    if ( is_T($member) || is_TR($member) ) {
-      push @types, $member;
-      $suppress_member->{$member} = TRUE;
+  my $color_name;
+  foreach my $member ( $color_members->{$color}->@* ) {
+    my $name = $clade_names->{$member};
+    if (!defined($name)) {
+      ;
+    } elsif ( !defined($color_name) ) {
+      $color_name = $name;
+    } elsif ( $color_name eq $name ) {
+      ;
+    } else {
+      die "Multiple names for clade: <<$color_name>>, <<$name>>,";
     }
   }
-  if (scalar(@types) == 0) {
+
+  if (!defined($color_name)) {
     $num_unnamed++;
-    $clade_names->{$color} = sprintf("~%06d",$num_unnamed);
-  } else {
-    $clade_names->{$color} = join(", ", sort {$a cmp $b} @types);
+    $color_name = sprintf("Unnamed %s%d",$opt_U,$num_unnamed);
   }
+  $color_names->{$color} = $color_name;
 }
 
 # ------------------------------------------------------------------------
@@ -430,8 +455,8 @@ foreach my $color ( @sorted_colors ) {
 my $num_colors = 0;
 
 foreach my $color ( @sorted_colors ) {
-  my $name = $clade_names->{$color};
-  my @members = $clade_members->{$color}->@*;
+  my $name = $color_names->{$color};
+  my @members = $color_members->{$color}->@*;
 
   if ($opt_s && scalar(@members) == 1) { next; }
 
@@ -448,15 +473,9 @@ foreach my $color ( @sorted_colors ) {
 
   } else {
 
-    if ( $name =~ /^~0*([0-9]+)$/ ) {
-      $name = "Unnamed #$1";
-    }
     print "### $name\n\n";
     my $skip = FALSE;
     foreach my $member ( sort {$a cmp $b} @members ) {
-      if ($suppress_member->{$member}) {
-	next;
-      }
       my $len = $replicon_lengths->{$member};
       if (defined($len)) {
 	print " - $member [$len]\n";
