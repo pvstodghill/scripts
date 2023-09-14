@@ -462,12 +462,14 @@ foreach my $color ( @sorted_colors ) {
 
   if ( $opt_t ) {
 
+    my $name2 = $name;
+    $name2 =~ s/^Unnamed //;
     foreach my $member ( sort {$a cmp $b} @members ) {
       my $len = $replicon_lengths->{$member};
       if (defined($len)) {
-	print join("\t",$num_colors,$member,$len),"\n";
+	print join("\t",$name2,$member,$len),"\n";
       } else {
-	print join("\t",$num_colors,$member),"\n";
+	print join("\t",$name2,$member),"\n";
       }
     }
 
