@@ -70,7 +70,7 @@ sub parse_gff_attributes {
 
 # ------------------------------------------------------------------------
 
-my $accession_of = {};
+my $accessions_of = {};
 
 open(my $gff_fh,"<",$gff_fn) || die "Cannot open: $gff_fn,";
 while (<$gff_fh>) {
@@ -82,20 +82,31 @@ while (<$gff_fh>) {
     }
     next;
   }
-my ($accession,$source,$feature,$start,$end,
-    $score,$strand,$frame,$raw_attributes) = split(/\t/,$_);
-my $attributes = parse_gff_attributes($raw_attributes);
+  my ($accession,$source,$feature,$start,$end,
+      $score,$strand,$frame,$raw_attributes) = split(/\t/,$_);
+  my $attributes = parse_gff_attributes($raw_attributes);
 
   if ( $feature ne "CDS" ) {
     next;
   }
 
-  my $protein_id = $attributes->{protein_id};
-  (defined($protein_id)) || die;
-  $protein_id =~ s/^gnl\|Prokka\|//;
+  if (defined($attributes->{pseudo})) {
+    next;
+  }
 
-  (!defined($accession_of->{$protein_id})) || die "dup: $protein_id,";
-  $accession_of->{$protein_id} = $accession;
+  my $protein_id = $attributes->{protein_id};
+  if (!(defined($protein_id))) {
+    use Data::Dumper;
+    print Dumper($attributes),"\n";
+    die "Could not find protein_id attr on CDS record,";
+  }
+  $protein_id =~ s/^gnl\|Prokka\|//;
+  $protein_id =~ s/^extdb://;
+
+  if (!defined($accessions_of->{$protein_id})) {
+    $accessions_of->{$protein_id} = {};
+  }
+  $accessions_of->{$protein_id}->{$accession} = TRUE;
 }
 close($gff_fh);
 
@@ -103,20 +114,25 @@ close($gff_fh);
 
 my $contents_of = {};
 my $protein_id;
-my $accession;
+my $accessions;
 
 open(my $faa_fh,"<",$faa_fn) || die "Cannot open: $faa_fn,";
 while (<$faa_fh>) {
   if ( />([^ ]*)/ ) {
     $protein_id = $1;
     (defined($protein_id) && $protein_id ne "") || die;
-    $accession = $accession_of->{$protein_id};
-    (defined($accession)) || die "missing: <<$protein_id>>,";
-    if (!defined($contents_of->{$accession})) {
-      $contents_of->{$accession} = "";
+    $protein_id =~ s/^gnl\|extdb\|//;
+    $accessions = $accessions_of->{$protein_id};
+    (defined($accessions)) || die "missing: <<$protein_id>>,";
+    foreach my $accession (keys($accessions->%*)) {
+      if (!defined($contents_of->{$accession})) {
+	$contents_of->{$accession} = "";
+      }
     }
   }
-  $contents_of->{$accession} .= $_;
+  foreach my $accession (keys($accessions->%*)) {
+    $contents_of->{$accession} .= $_;
+  }
 }
 
 # ------------------------------------------------------------------------
@@ -127,6 +143,8 @@ foreach my $accession ( sort (keys $contents_of->%*) ) {
     my ($db,$accession,$extra) = split(/[|]/,$out_name);
     if ( $db eq "gnl" && $accession eq "Prokka" ) {
       ($db,$accession,$extra) = ("gnl|Prokka",$extra,"");
+    } elsif ( $db eq "gnl" && $accession eq "extdb" ) {
+      ($db,$accession,$extra) = ("gnl|extdb",$extra,"");
     } else {
       ($db eq "lcl" || $db eq "gb") || die "[1]cannot parse seqname=<<$out_name>>,";
     }
