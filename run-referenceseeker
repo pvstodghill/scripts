@@ -48,7 +48,7 @@ if [ -z "$1" -o "$2" ] ; then
 fi
 
 if [ -z "$opt_g" -a -z "$opt_r" ] ; then
-    opt_g=1
+    # opt_g=1 # GTDB is no more.
     opt_r=1
 fi
 
