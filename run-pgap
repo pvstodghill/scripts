@@ -124,12 +124,18 @@ if [ x"$1"x == x--x ] ; then
     shift 1
 fi
 
-# ------------------------------------------------------------------------
-
 if [ "$SUBMOL_YAML" ] ; then
     cp --archive "$SUBMOL_YAML" ${TEMP_PATH}/input/submol.yaml
 
-    cat <<EOF > ${TEMP_PATH}/input/input.yaml
+else
+    cat <<EOF > ${TEMP_PATH}/input/submol.yaml 
+organism:
+    genus_species: ${ORGANISM_NAME}
+EOF
+
+fi
+
+cat <<EOF > ${TEMP_PATH}/input/input.yaml
 fasta:
   class: File
   location: genome.fasta
@@ -139,8 +145,6 @@ submol:
 
 EOF
 
-fi
-
 # ------------------------------------------------------------------------
 
 (
@@ -148,15 +152,9 @@ fi
     ulimit -n 8192
     (
 	set +e # keep going even if pgap.py fails
-	if [ "$SUBMOL_YAML" ] ; then
-	    run ./pgap.py -D ${BACKEND} --output ${TEMP_DIR}/output "$@" \
-		--report-usage-false --no-internet --taxcheck \
-		${TEMP_DIR}/input/input.yaml
-	else
-	    run ./pgap.py -D ${BACKEND} --output ${TEMP_DIR}/output "$@" \
-		--report-usage-false --no-internet --taxcheck \
-		--genome ${TEMP_DIR}/input/genome.fasta --organism "${ORGANISM_NAME}"
-	fi
+	run ./pgap.py -D ${BACKEND} --output ${TEMP_DIR}/output "$@" \
+	    --report-usage-false --no-internet --taxcheck \
+	    ${TEMP_DIR}/input/input.yaml
 	true # keep going even if pgap.py fails
     )
 )
