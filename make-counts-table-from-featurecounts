@@ -116,7 +116,7 @@ foreach my $tag_file ( @tag_files ) {
     if ($Geneid eq "Geneid") { next; }
     my $row = $idattr_row{$Geneid};
     if (!defined($row)) { next; }
-    (!defined($row->{$tag})) || die;
+    (!defined($row->{$tag})) || die "<<tag=$tag>>,";
     $row->{$tag} = $count;
   }
   close $fh;
