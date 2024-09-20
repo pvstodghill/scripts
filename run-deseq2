@@ -15,7 +15,7 @@ if ( length(args) != 1 ) {
 pval.cutoff <- -1
 padj.cutoff <- -1
 
-print.session.info <- TRUE
+print.session.info <- FALSE
 
 extended.results.filename <- FALSE
 
