@@ -69,7 +69,9 @@ my %start_of;
 my %end_of;
 my %strand_of;
 my %old_locus_tag_of;
+my %locus_tag_of;
 my %gene_name_of;
+my %Name_of;
 
 use constant { NO_VALUE => ";no-value;" };
 
@@ -114,11 +116,10 @@ while (<$regions_fh>) {
   $start_of{$idattr} = $start;
   $end_of{$idattr} = $end;
   $strand_of{$idattr} = $strand;
-  if ($idattr ne $attributes->{locus_tag}) {
-    die "idattr=<<$idattr>>, locus_tag=<<$attributes->{locus_tag}>>",
-  }
+  $locus_tag_of{$idattr} = $attributes->{locus_tag};
   $old_locus_tag_of{$idattr} = $attributes->{old_locus_tag};
   $gene_name_of{$idattr} = $attributes->{gene};
+  $Name_of{$idattr} = $attributes->{Name};
 
 }
 close($regions_fh);
@@ -159,7 +160,7 @@ if ( $opt_t ) {
       }
       if ($F[0] eq "Row.names" ) {
 	shift @F;
-	@F = ("start","end","strand","names", @F);
+	@F = ("accession", "start","end","strand","id","names", @F);
       }
     } else {
       my $idattr = shift @F;
@@ -170,9 +171,12 @@ if ( $opt_t ) {
       my $end = $end_of{$idattr};
       my $strand = $strand_of{$idattr};
       my %names;
+      $names{$locus_tag_of{$idattr}} = TRUE if (defined($locus_tag_of{$idattr}));
       $names{$old_locus_tag_of{$idattr}} = TRUE if (defined($old_locus_tag_of{$idattr}));
       $names{$gene_name_of{$idattr}} = TRUE if (defined($gene_name_of{$idattr}));
+      $names{$Name_of{$idattr}} = TRUE if (defined($Name_of{$idattr}));
       $names{$alias_of{$idattr}} = TRUE if (defined($alias_of{$idattr}));
+      delete $names{$idattr};
       my $names = join(",", sort {$a cmp $b} (keys %names));
 
       @F = ($accession,$start,$end,$strand,$idattr,$names, @F);
@@ -244,15 +248,18 @@ if ( $opt_g ) {
       next;
     }
 
-      my $accession = $accession_of{$idattr};
-      (defined($accession)) || die "idattr=<<$idattr>>,";
-      my $start = $start_of{$idattr};
-      my $end = $end_of{$idattr};
-      my $strand = $strand_of{$idattr};
-      my %names;
-      $names{$old_locus_tag_of{$idattr}} = TRUE if (defined($old_locus_tag_of{$idattr}));
-      $names{$gene_name_of{$idattr}} = TRUE if (defined($gene_name_of{$idattr}));
-      $names{$alias_of{$idattr}} = TRUE if (defined($alias_of{$idattr}));
+    my $accession = $accession_of{$idattr};
+    (defined($accession)) || die "idattr=<<$idattr>>,";
+    my $start = $start_of{$idattr};
+    my $end = $end_of{$idattr};
+    my $strand = $strand_of{$idattr};
+    my %names;
+    $names{$locus_tag_of{$idattr}} = TRUE if (defined($locus_tag_of{$idattr}));
+    $names{$old_locus_tag_of{$idattr}} = TRUE if (defined($old_locus_tag_of{$idattr}));
+    $names{$gene_name_of{$idattr}} = TRUE if (defined($gene_name_of{$idattr}));
+    $names{$Name_of{$idattr}} = TRUE if (defined($Name_of{$idattr}));
+    $names{$alias_of{$idattr}} = TRUE if (defined($alias_of{$idattr}));
+    delete $names{$idattr};
     my $names = join(",", sort {$a cmp $b} (keys %names));
 
     my $score = $padj;
@@ -269,6 +276,8 @@ if ( $opt_g ) {
 
     my @attributes = ();
     my @notes = ();
+
+    push @attributes, "gene_id \"$idattr\"";
 
     if ( defined($names) ) {
       push @attributes, "names \"$names\"";
