@@ -1,0 +1,269 @@
+#! /usr/bin/env perl
+
+use strict;
+use warnings;
+
+use File::Basename;
+use Getopt::Std;
+
+our $opt_h;
+
+sub usage {
+  my $progname = basename($0);
+  print STDERR "Usage: cat foo.gbk | $progname [options] [feature1 -feature2 ...] \n";
+  print STDERR "-h - print help\n";
+  exit(@_);
+}
+
+my $stat = getopts('h');
+if (!$stat) {
+  usage(1);
+}
+if ($opt_h) {
+  usage();
+}
+
+
+
+my $print_by_default = 1;
+my %to_activate;
+my %to_suppress;
+for my $k ( @ARGV ) {
+  $k = lc($k);
+  if ( $k =~ /-(.*)/ ) {
+    $to_suppress{$1} = 1;
+  } else {
+    $to_activate{$k} = 1;
+    $print_by_default = 0;
+  }
+}
+
+if ( scalar(keys %to_activate) > 0 &&
+     scalar(keys %to_suppress) > 0 ) {
+  print STDERR "# Printing of features are being both activated and suppressed.\n";
+  print STDERR "# Results are not probably not what you expect.\n";
+}
+
+
+my $accession;
+
+while (<STDIN>) {
+  if ( $_ =~ /^LOCUS +([^ ]+)/ ) {
+    $accession = $1;
+  # } elsif ( $_ =~ /^ACCESSION   (.*)/ ) {
+  #   $accession = $1;
+  } elsif ( $_ =~ /^FEATURES    / ) {
+    last;
+  }
+}
+
+my $first;
+my ($key,$loc,@rest);
+
+while (<STDIN>) {
+  $_ =~ s/[\r\n]+$//;
+  chomp;
+  if ( $_ =~ /^[A-Z]/ ) {
+    last;
+  }
+  if ( $_ =~ /^     ([^ ]+) + ([^ ]+$)/ ) {
+    emit();
+    $first = $_;
+    ($key,$loc,@rest) = ($1,$2);
+  } else {
+    s/^ +//;
+    push @rest, $_;
+  }
+}
+emit();
+
+
+sub emit {
+  if (!defined($key)) {
+    return;
+  }
+  {
+    my $key = lc $key;
+    if ( $to_activate{$key} ) {
+      # ok
+    } elsif ( $to_suppress{$key} ) {
+      return;
+    } elsif ($print_by_default) {
+      # ok
+    } else {
+      return;
+    }
+  }
+  my @raw_fields = ($loc);
+  foreach my $l ( @rest ) {
+    if ( $l =~ /^\/[^ ]/ ) {
+      push @raw_fields, $l;
+    } else {
+      $raw_fields[-1] .= " " . $l;
+    }
+  }
+  $loc = shift @raw_fields;
+
+  my %fields;
+  foreach my $raw_field ( @raw_fields ) {
+    my ($name,$value);
+    if ($raw_field =~ /^\/([^=]+)="?([^"]*)"?$/) {
+      ($name,$value) = ($1,$2);
+    } elsif ($raw_field =~ /^\/([^=]+)$/) {
+      ($name,$value) = ($1,"true");
+    } else {     
+      die("raw_field=<<$raw_field>>\n".join("\n",@raw_fields));
+    }
+    $value =~ s/\//%2f/g;
+    $value =~ s/,/%2c/g;
+    $value =~ s/"/%22/g;
+    $value =~ s/;/%3b/g;
+    if ( defined($fields{$name}) ) {
+      $fields{$name} .= ",".$value;
+    } else {
+      $fields{$name} = $value;
+    }
+  }
+
+  my @locs = parse_loc($loc);
+
+  if ($key eq "gene" && !defined($fields{gene_id})) {
+    if (defined($fields{locus_tag})) {
+      $fields{gene_id} = $fields{locus_tag};
+    } else {
+      die "need something for gene_id,";
+    }
+  }
+
+  my @attributes;
+  foreach my $name (sort (keys %fields)) {
+    my $value=$fields{$name};
+    push @attributes, "$name=$value";
+  }
+  my $attributes = join(";",@attributes);
+
+  foreach my $loc ( @locs ) {
+    my ($start,$end,$strand) = @$loc;
+    print join("\t",$accession,"gbk2gff",$key,$start,$end,".",$strand,".",$attributes),"\n";
+  }
+}
+
+sub parse_loc {
+  my ($s) = @_;
+
+  my $tokens = [make_tokens($s)];
+  my @locs = parse_clause($tokens);
+  if ( $#{$tokens} != -1 ) {
+    error("Extra tokens at end of loc",@$tokens);
+  }
+  return @locs;
+}
+
+sub make_tokens {
+  my ($s) = @_;
+  my @tokens;
+  while ($s ne "") {
+    $s =~ s/^[ \t]+//;
+    my $t;
+    if ( $s =~ /^([0-9]+)(.*)/ ) {
+      ($t,$s) = ($1,$2);
+    } elsif ( $s =~ /^([a-z]+)(.*)/ ) {
+      ($t,$s) = ($1,$2);
+    } elsif ( $s =~ /^(\.\.)(.*)/ ) {
+      ($t,$s) = ($1,$2);
+    } elsif ( $s =~ /^([(),><])(.*)/ ) {
+      ($t,$s) = ($1,$2);
+    } else {
+      die "$s\n";
+    }
+    push @tokens, $t;
+  }
+  return @tokens;
+}
+
+sub parse_clause {
+  my ($tokens) = @_;
+
+  my $t = ${$tokens}[0];
+  if ( is_number($t) ) {
+    my $x = parse_number($tokens);
+    $t = ${$tokens}[0];
+    if ( !defined($t) || $t ne ".." ) {
+      return ([$x,$x,"+"]);
+    }
+    shift @$tokens;
+    my $y = parse_number($tokens);
+    if ( $x <= $y ) {
+      return ([$x,$y,"+"]);
+    } else {
+      return ([$y,$x,"-"]);
+    }
+  } elsif ( $t eq "complement" ) {
+    $t = shift @$tokens;
+    $t = shift @$tokens;
+    ( $t eq "(" ) || error("Expected (",$t,@$tokens);
+    my @l = parse_clause($tokens);
+    $t = shift @$tokens;
+    ( $t eq ")" ) || error("Expected )",$t,@$tokens);
+    foreach my $ll ( @l ) {
+      if ( ${$ll}[2] eq "+" ) {
+	${$ll}[2] = "-";
+      } else {
+	${$ll}[2] = "+";
+      }
+    }
+    return @l;
+  } elsif ( $t eq "order" || $t eq "join" ) {
+    $t = shift @$tokens;
+    $t = shift @$tokens;
+    ( $t eq "(" ) || error("Expected (",$t,@$tokens);
+    my @l = parse_clauses($tokens);
+    $t = shift @$tokens;
+    ( $t eq ")" ) || error("Expected )",$t,@$tokens);
+    return @l;
+  } else {
+    error("Unexpected token \"$t\"",$t,@$tokens);
+  }
+}
+
+sub is_number {
+  my ($t) = @_;
+  if ( $t =~ /^[0-9]+$/ ) {
+    return 1;
+  } elsif ( $t eq ">" ) {
+    return 1;
+  } elsif ( $t eq "<" ) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+sub parse_number {
+  my ($tokens) = @_;
+  my $t = shift @$tokens;
+  if ( $t eq ">" || $t eq "<" ) {
+    $t = shift @$tokens;
+  }
+  ( $t =~ /^[0-9]+$/ ) || error("Expected number", $t, @$tokens);
+  return $t;
+}
+
+sub parse_clauses {
+  my ($tokens) = @_;
+  my @l = ();
+  my @c = parse_clause($tokens);
+  push @l, @c;
+  while ( ${$tokens}[0] eq "," ) {
+    shift @$tokens;
+    @c = parse_clause($tokens);
+    push @l, @c;
+  }
+  return @l;
+}
+
+sub error {
+  my ($msg,@tokens) = @_;
+  die $msg.": ".join("",@tokens);
+}
+
