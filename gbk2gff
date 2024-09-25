@@ -1,7 +1,22 @@
 #! /usr/bin/env perl
 
 use strict;
-use warnings;
+use feature 'postderef';
+use warnings FATAL => 'all';
+no warnings "experimental::postderef";
+#use Carp::Always;
+
+# use FindBin;
+# use lib "$FindBin::Bin";
+# use Xyzzy;
+
+use constant { TRUE => 1, FALSE => 0 };
+
+# 'wide character' warning.
+binmode(STDIN, ":utf8");
+binmode(STDOUT, ":utf8");
+
+# ------------------------------------------------------------------------
 
 use File::Basename;
 use Getopt::Std;
@@ -23,8 +38,6 @@ if ($opt_h) {
   usage();
 }
 
-
-
 my $print_by_default = 1;
 my %to_activate;
 my %to_suppress;
@@ -45,108 +58,7 @@ if ( scalar(keys %to_activate) > 0 &&
 }
 
 
-my $accession;
-
-while (<STDIN>) {
-  if ( $_ =~ /^LOCUS +([^ ]+)/ ) {
-    $accession = $1;
-  # } elsif ( $_ =~ /^ACCESSION   (.*)/ ) {
-  #   $accession = $1;
-  } elsif ( $_ =~ /^FEATURES    / ) {
-    last;
-  }
-}
-
-my $first;
-my ($key,$loc,@rest);
-
-while (<STDIN>) {
-  $_ =~ s/[\r\n]+$//;
-  chomp;
-  if ( $_ =~ /^[A-Z]/ ) {
-    last;
-  }
-  if ( $_ =~ /^     ([^ ]+) + ([^ ]+$)/ ) {
-    emit();
-    $first = $_;
-    ($key,$loc,@rest) = ($1,$2);
-  } else {
-    s/^ +//;
-    push @rest, $_;
-  }
-}
-emit();
-
-
-sub emit {
-  if (!defined($key)) {
-    return;
-  }
-  {
-    my $key = lc $key;
-    if ( $to_activate{$key} ) {
-      # ok
-    } elsif ( $to_suppress{$key} ) {
-      return;
-    } elsif ($print_by_default) {
-      # ok
-    } else {
-      return;
-    }
-  }
-  my @raw_fields = ($loc);
-  foreach my $l ( @rest ) {
-    if ( $l =~ /^\/[^ ]/ ) {
-      push @raw_fields, $l;
-    } else {
-      $raw_fields[-1] .= " " . $l;
-    }
-  }
-  $loc = shift @raw_fields;
-
-  my %fields;
-  foreach my $raw_field ( @raw_fields ) {
-    my ($name,$value);
-    if ($raw_field =~ /^\/([^=]+)="?([^"]*)"?$/) {
-      ($name,$value) = ($1,$2);
-    } elsif ($raw_field =~ /^\/([^=]+)$/) {
-      ($name,$value) = ($1,"true");
-    } else {     
-      die("raw_field=<<$raw_field>>\n".join("\n",@raw_fields));
-    }
-    $value =~ s/\//%2f/g;
-    $value =~ s/,/%2c/g;
-    $value =~ s/"/%22/g;
-    $value =~ s/;/%3b/g;
-    if ( defined($fields{$name}) ) {
-      $fields{$name} .= ",".$value;
-    } else {
-      $fields{$name} = $value;
-    }
-  }
-
-  my @locs = parse_loc($loc);
-
-  if ($key eq "gene" && !defined($fields{gene_id})) {
-    if (defined($fields{locus_tag})) {
-      $fields{gene_id} = $fields{locus_tag};
-    } else {
-      die "need something for gene_id,";
-    }
-  }
-
-  my @attributes;
-  foreach my $name (sort (keys %fields)) {
-    my $value=$fields{$name};
-    push @attributes, "$name=$value";
-  }
-  my $attributes = join(";",@attributes);
-
-  foreach my $loc ( @locs ) {
-    my ($start,$end,$strand) = @$loc;
-    print join("\t",$accession,"gbk2gff",$key,$start,$end,".",$strand,".",$attributes),"\n";
-  }
-}
+# ------------------------------------------------------------------------
 
 sub parse_loc {
   my ($s) = @_;
@@ -266,4 +178,125 @@ sub error {
   my ($msg,@tokens) = @_;
   die $msg.": ".join("",@tokens);
 }
+
+# ------------------------------------------------------------------------
+
+my $accession;
+my $first;
+my ($key,$loc,@rest);
+
+sub emit {
+  if (!defined($key)) {
+    return;
+  }
+  {
+    my $key = lc $key;
+    if ( $to_activate{$key} ) {
+      # ok
+    } elsif ( $to_suppress{$key} ) {
+      return;
+    } elsif ($print_by_default) {
+      # ok
+    } else {
+      return;
+    }
+  }
+  my @raw_fields = ($loc);
+  foreach my $l ( @rest ) {
+    if ( $l =~ /^\/[^ ]/ ) {
+      push @raw_fields, $l;
+    } else {
+      $raw_fields[-1] .= " " . $l;
+    }
+  }
+  $loc = shift @raw_fields;
+
+  my %fields;
+  foreach my $raw_field ( @raw_fields ) {
+    my ($name,$value);
+    if ($raw_field =~ /^\/([^=]+)="?([^"]*)"?$/) {
+      ($name,$value) = ($1,$2);
+    } elsif ($raw_field =~ /^\/([^=]+)$/) {
+      ($name,$value) = ($1,"true");
+    } else {     
+      die("raw_field=<<$raw_field>>\n".join("\n",@raw_fields));
+    }
+    $value =~ s/\//%2f/g;
+    $value =~ s/,/%2c/g;
+    $value =~ s/"/%22/g;
+    $value =~ s/;/%3b/g;
+    if ( defined($fields{$name}) ) {
+      $fields{$name} .= ",".$value;
+    } else {
+      $fields{$name} = $value;
+    }
+  }
+
+  my @locs = parse_loc($loc);
+
+  if ($key eq "gene" && !defined($fields{gene_id})) {
+    if (defined($fields{locus_tag})) {
+      $fields{gene_id} = $fields{locus_tag};
+    } else {
+      die "need something for gene_id,";
+    }
+  }
+
+  my @attributes;
+  foreach my $name (sort (keys %fields)) {
+    my $value=$fields{$name};
+    push @attributes, "$name=$value";
+  }
+  my $attributes = join(";",@attributes);
+
+  foreach my $loc ( @locs ) {
+    my ($start,$end,$strand) = @$loc;
+    print join("\t",$accession,"gbk2gff",$key,$start,$end,".",$strand,".",$attributes),"\n";
+  }
+}
+
+# ------------------------------------------------------------------------
+
+while (TRUE) {
+
+  $accession = undef;
+
+  while (<STDIN>) {
+    if ( $_ =~ /^LOCUS +([^ ]+)/ ) {
+      $accession = $1;
+    } elsif ( $_ =~ /^ACCESSION   (.*)/ && $1 ne "." ) {
+      $accession = $1;
+    } elsif ( $_ =~ /^FEATURES    / ) {
+      last;
+    }
+  }
+
+  if (!defined($accession)) {
+    last;
+  }
+
+  ($first,$key,$loc,@rest) = ();
+
+  while (<STDIN>) {
+    if ($_ eq "//") {
+      last;
+    }
+    $_ =~ s/[\r\n]+$//;
+    chomp;
+    if ( $_ =~ /^[A-Z]/ ) {
+      last;
+    }
+    if ( $_ =~ /^     ([^ ]+) + ([^ ]+$)/ ) {
+      emit();
+      $first = $_;
+      ($key,$loc,@rest) = ($1,$2);
+    } else {
+      s/^ +//;
+      push @rest, $_;
+    }
+  }
+  emit();
+}
+
+
 
