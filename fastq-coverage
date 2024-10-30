@@ -1,0 +1,86 @@
+#! /bin/bash
+
+set -e
+set -o pipefail
+
+export LC_ALL=C
+
+opt_p=2
+opt_g=5Mbps
+
+_usage=
+
+_usage+="Usage: $0 [options] 1.fastq.gz 2.fq ...\n"
+_usage+="-g SIZE - genome size [$opt_g]\n"
+_usage+="-h - this message\n"
+_usage+="-p NUM - precision of output [$opt_p]\n"
+
+function usage {
+    echo -e -n "$_usage" 1>&2
+    exit "$@"
+}    
+
+# v-- add this if inside a function
+# local OPTIND opt_h opt_o
+
+while getopts 'g:h' opt ; do
+    case "$opt" in
+	g) opt_g="$OPTARG" ;;
+	h) opt_h=1 ;;
+	\?) usage 1 ;;
+	*) echo 1>&2 "Can't happen" ; exit 1 ;;
+    esac
+done
+shift $((OPTIND-1))
+
+if [ "$opt_h" ] ; then
+    usage
+fi
+
+# ------------------------------------------------------------------------
+
+num="$(echo "$opt_g" | sed -e 's/^\([0-9][0-9,]*\).*/\1/')"
+# if [ "$num" = "$opt_g" ] ; then
+#     echo 1>&2 "Ill-formed genome size: $opt_g"
+#     exit 1
+# fi
+num="$(echo $num | sed -e 's/,//g')"
+
+foo="$(echo "$opt_g" | sed -e 's/^[0-9][0-9,]*//' -e 's/[bB][pP][sS]$//')"
+
+if [ "$foo" = "" ] ; then
+    factor=1
+elif [ "$foo" = "k" -o "$foo" = "K" ] ; then
+    factor=1000
+elif [ "$foo" = "m" -o "$foo" = "M" ] ; then
+    factor=1000000
+elif [ "$foo" = "g" -o "$foo" = "G" ] ; then
+    factor=1000000000
+else
+    echo 1>&2 "Ill-formed genome size: $opt_g"
+    exit 1
+fi  
+
+size=$[ $num * $factor ]
+
+# ------------------------------------------------------------------------
+
+function count_bases {
+    (
+	for f in "$@" ; do
+	    case X"$f"X in
+		X*.gzX) gzip -cd "$f" ;;
+		*) cat "$f"
+	    esac
+	done
+    ) | fastq2seq | strings-length | profile-reduce + 0
+}
+
+bases=$(count_bases "$@")
+
+# ------------------------------------------------------------------------
+
+coverage=$(dc -e "$opt_p k $bases.0 $size.0 / p")
+
+echo $coverage
+
