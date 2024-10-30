@@ -73,14 +73,24 @@ foreach my $raw_infile ( @ARGV ) {
 sub process_file {
   my ($infile,$title,$workbook) = @_;
 
-  my $parser = Text::CSV::Simple->new({sep_char => "\t", quote_char => undef});
-  my @data = $parser->read_file($infile);
+  # my $parser = Text::CSV::Simple->new({sep_char => "\t", quote_char => undef});
+  # my @data = $parser->read_file($infile);
+
+  my @data;
+  open (my $fh,"<",$infile) || die "Cannot open: $infile";
+  while (<$fh>) {
+    s/[\r\n]+$//;
+    push @data, [ split("\t") ];
+  }
+  close($fh) || die;
+
   my $headers;
   if ($opt_H) {
     $headers = [];
   } else {
     $headers = shift @data;
   }
+
   import_data($workbook, $title, $headers, [@data]);
 }
 
