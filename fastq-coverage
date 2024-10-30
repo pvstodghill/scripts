@@ -23,10 +23,11 @@ function usage {
 # v-- add this if inside a function
 # local OPTIND opt_h opt_o
 
-while getopts 'g:h' opt ; do
+while getopts 'g:hp:' opt ; do
     case "$opt" in
 	g) opt_g="$OPTARG" ;;
 	h) opt_h=1 ;;
+	p) opt_p="$OPTARG" ;;
 	\?) usage 1 ;;
 	*) echo 1>&2 "Can't happen" ; exit 1 ;;
     esac
