@@ -47,7 +47,7 @@ sub read_fasta {
 	|| die "Can't open $filename\n";
     }
     while (<$fh>) {
-	chomp $_;
+        s/[\n\r]+$//;
 	if ( $_ =~ /^>(.*)/ ) {
 	    if ( defined($defline) ) {
 		$h{$defline} = $seq;
