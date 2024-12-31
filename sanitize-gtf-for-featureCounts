@@ -90,9 +90,11 @@ sub unparse_gtf_attributes {
   foreach my $key (sort (keys %$attributes) ) {
     my $val = $attributes->{$key};
     if ( $val eq NO_VALUE ) {
-      push @l, $key;
+      push @l, $key.'""'.$val;
     } else {
-      if ( $val =~ /[ "'\\]/ ) {
+      if ( $val eq "" ) {
+	$val = '""';
+      } elsif ( $val =~ /[ "'\\]/ ) {
 	$val = '"'.$val.'"';
       }
       push @l, $key." ".$val;
