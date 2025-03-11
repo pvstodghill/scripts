@@ -24,13 +24,14 @@ function usage {
     exit "$@"
 }    
 
-while getopts 'a:ghru' opt ; do
+while getopts 'a:ghrt:u' opt ; do
     case "$opt" in
 
 	a) opt_a="--ani $OPTARG" ;;
 	h) opt_h=1 ;;
 	g) opt_g=1 ;;
 	r) opt_r=1 ;;
+	t) opt_t="--threads $OPTARG" ;;
 	u) opt_u="--unfiltered" ;;
 
 	\?) usage 1 ;;
@@ -68,7 +69,7 @@ if [ "$opt_r" ] ; then
     echo 1>&2 '### Refseq'
     (
 	set -x
-	referenceseeker $opt_a $opt_u ./bacteria-refseq ./temp/genome.fasta
+	referenceseeker $opt_a $opt_u $opt_t ./bacteria-refseq ./temp/genome.fasta
     )
 fi
 
@@ -76,6 +77,6 @@ if [ "$opt_g" ] ; then
     echo 1>&2 '### GTDB'
     (
 	set -x
-	referenceseeker $opt_a $opt_u ./bacteria-gtdb ./temp/genome.fasta
+	referenceseeker $opt_a $opt_u $opt_t ./bacteria-gtdb ./temp/genome.fasta
     )
 fi
