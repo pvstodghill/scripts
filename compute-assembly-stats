@@ -6,7 +6,7 @@ set -e
 SCRIPTS=$(dirname $0)
 
 function usage {
-    echo 1>&2 "Usage: $0 [options] [raw_long.fq[.gz] trimmed_long.fq[.gz]] raw_R1.fq[.gz] raw_R2.fq[.gz] trimmed_R1.fq[.gz] trimmed_R2.fq[.gz] final.fna[.gz] final.gff[.gz]"
+    echo 1>&2 "Usage: $0 [options] [raw_long.fq[.gz] trimmed_long.fq[.gz]] [raw_R1.fq[.gz] raw_R2.fq[.gz] trimmed_R1.fq[.gz] trimmed_R2.fq[.gz]] final.fna[.gz] final.gff[.gz]"
     echo 1>&2 "-S STRAIN - include STRAIN name in output"
     echo 1>&2 "-H - suppress header with -s"
     echo 1>&2 "-h - this message"
@@ -48,21 +48,30 @@ fi
 
 DIR=$(mktemp -p . -d)
 
-if [ -z "$6" -o "$9" ] ; then
+if [ $# = 4 ] ; then
+    :
+elif [ $# = 6 ] ; then
+    :
+elif [ $# = 8 ] ; then
+    :
+else
     usage 1
 fi
 
-if [ "$8" ] ; then
+if [ $# = 4 -o $# = 8 ] ; then
     RAW_LONG_FQ="$1"
     shift 1
     TRIMMED_LONG_FQ="$1"
     shift 1
 fi
 
-RAW_R1_FQ="$1" ; shift 1
-RAW_R2_FQ="$1" ; shift 1
-TRIMMED_R1_FQ="$1" ; shift 1
-TRIMMED_R2_FQ="$1" ; shift 1
+if [ $# = 4 -o $# = 6 ] ; then
+    RAW_R1_FQ="$1" ; shift 1
+    RAW_R2_FQ="$1" ; shift 1
+    TRIMMED_R1_FQ="$1" ; shift 1
+    TRIMMED_R2_FQ="$1" ; shift 1
+fi
+
 FINAL_FNA="$1" ; shift 1
 FINAL_GFF="$1" ; shift 1
 
@@ -156,33 +165,42 @@ fi
 
 # ------------------------------------------------------------------------
 
-log "Computing aligned Illumina bases"
+if [ "$TRIMMED_R2_FQ" ] ; then
 
-safe_cat $FINAL_FNA > $DIR/final.fna
-bowtie2-build -q $DIR/final.fna $DIR/final.fna
-bowtie2 --threads ${THREADS} --quiet \
-	-x $DIR/final.fna \
-	-1 $TRIMMED_R1_FQ -2 $TRIMMED_R2_FQ \
-    | samtools view -h -F 0x900 \
-    | samtools sort -@ ${THREADS} 2>/dev/null \
-	       > $DIR/illumina.sam
+    log "Computing aligned Illumina bases"
 
-NUM_ILLUMINA_ALIGNED=$(
-    samtools depth $DIR/illumina.sam \
-	| cut -f3 \
-	| gawk 'BEGIN {x=0} {x+=$1} END {print x}'
-		    )
+    safe_cat $FINAL_FNA > $DIR/final.fna
+    bowtie2-build -q $DIR/final.fna $DIR/final.fna
+    bowtie2 --threads ${THREADS} --quiet \
+	    -x $DIR/final.fna \
+	    -1 $TRIMMED_R1_FQ -2 $TRIMMED_R2_FQ \
+	| samtools view -h -F 0x900 \
+	| samtools sort -@ ${THREADS} 2>/dev/null \
+		   > $DIR/illumina.sam
 
-ILLUMINA_ACTUAL_COVERAGE=$(calc.1 "(1.0*$NUM_ILLUMINA_ALIGNED)/$GENOME_SIZE")
+    NUM_ILLUMINA_ALIGNED=$(
+	samtools depth $DIR/illumina.sam \
+	    | cut -f3 \
+	    | gawk 'BEGIN {x=0} {x+=$1} END {print x}'
+			)
+
+    ILLUMINA_ACTUAL_COVERAGE=w$(calc.1 "(1.0*$NUM_ILLUMINA_ALIGNED)/$GENOME_SIZE")
+
+else
+    ILLUMINA_ACTUAL_COVERAGE="n.d."
+fi
 
 # ------------------------------------------------------------------------
 
 log "Computing rest of results"
 
-READ_LENGTH=$[ $(safe_cat "$RAW_R1_FQ" | head -n2 | tail -n1 | wc --chars) - 1 ]
-NUM_READS=$[ $(safe_cat "$RAW_R1_FQ" | wc -l) / 4 ]
-
-ILLUMINA_THEORETICAL_COVERAGE=$(calc.1 "(2.0*$NUM_READS*$READ_LENGTH)/$GENOME_SIZE")
+if [ "$TRIMMED_R2_FQ" ] ; then
+    READ_LENGTH=$[ $(safe_cat "$RAW_R1_FQ" | head -n2 | tail -n1 | wc --chars) - 1 ]
+    NUM_READS=$[ $(safe_cat "$RAW_R1_FQ" | wc -l) / 4 ]
+    ILLUMINA_THEORETICAL_COVERAGE=$(calc.1 "(2.0*$NUM_READS*$READ_LENGTH)/$GENOME_SIZE")
+else
+    ILLUMINA_THEORETICAL_COVERAGE="n.d."
+fi
 
 # ------------------------------------------------------------------------
 
