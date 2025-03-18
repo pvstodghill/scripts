@@ -19,6 +19,7 @@ function usage {
     echo 1>&2 "-g - only run against GTDB"
     echo 1>&2 "-h - this message"
     echo 1>&2 "-r - only run against RefSeq"
+    echo 1>&2 "-t THREADS"
     echo 1>&2 "-u - unfiltered results"
 
     exit "$@"
@@ -28,8 +29,8 @@ while getopts 'a:ghrt:u' opt ; do
     case "$opt" in
 
 	a) opt_a="--ani $OPTARG" ;;
-	h) opt_h=1 ;;
 	g) opt_g=1 ;;
+	h) opt_h=1 ;;
 	r) opt_r=1 ;;
 	t) opt_t="--threads $OPTARG" ;;
 	u) opt_u="--unfiltered" ;;
