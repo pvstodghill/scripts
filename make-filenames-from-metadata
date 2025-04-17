@@ -187,7 +187,7 @@ while (<STDIN>) {
 
   if ($Category eq "") {
     # nop
-  } elsif ($Category eq "representative genome") {
+  } elsif ($Category eq "representative genome" || $Category eq "reference genome") {
     $is_repr->{$accession} = "R";
   } else {
     die "Category=<<$Category>>,";
