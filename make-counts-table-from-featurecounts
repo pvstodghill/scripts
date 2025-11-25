@@ -51,7 +51,6 @@ my ($regions_fn, @tag_files) = @ARGV;
 # Read the regions. Store by replicon.
 # ------------------------------------------------------------------------
 
-my @all_idattrs;
 my %idattr_row;
 
 use constant { NO_VALUE => ";no-value;" };
@@ -83,15 +82,19 @@ while (<$regions_fh>) {
   my $attributes = parse_gtf_attributes($raw_attributes);
   my $idattr = $attributes->{$id_arg};
   if (!defined($idattr)) { die "<<$_>>,"; }
-  push @all_idattrs, $idattr;
-  (!defined($idattr_row{$idattr})) || die "idattr=<<$idattr>>,";
-  $idattr_row{$idattr} = { "" => $idattr };
+  if (!defined($idattr_row{$idattr})) {
+    # duplicate $idattr are allowed. e.g., genes that cross origin.
+    # fixme: ^-- this should probably be a flag.
+    $idattr_row{$idattr} = { "" => $idattr };
+  }
 }
 close($regions_fh);
 
+my @all_idattrs = sort { $a cmp $b } (keys %idattr_row);
 if ( $opt_u ) {
   push @all_idattrs, "__not_aligned";
 }
+
 $idattr_row{"__not_aligned"} = { "" => "*"};
 
 
@@ -116,8 +119,12 @@ foreach my $tag_file ( @tag_files ) {
     if ($Geneid eq "Geneid") { next; }
     my $row = $idattr_row{$Geneid};
     if (!defined($row)) { next; }
-    (!defined($row->{$tag})) || die "<<tag=$tag>>,";
-    $row->{$tag} = $count;
+    if (!defined($row->{$tag})) {
+      # duplicate $idattr are allowed. e.g., genes that cross origin.
+      # fixme: ^-- this should probably be a flag.
+      $row->{$tag} = 0;
+    }
+    $row->{$tag} += $count;
   }
   close $fh;
 }
