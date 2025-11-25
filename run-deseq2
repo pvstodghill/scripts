@@ -33,7 +33,8 @@ dds <-DESeq(dds, quiet=TRUE, fitType=fit.type)
 
 # If padj.cutoff and pval.cutoff are disabled, then disable
 # independentFiltering too.
-use.independent.filtering <- !(( padj.cutoff == -1 ) && ( pval.cutoff == -1 ))
+#use.independent.filtering <- !(( padj.cutoff == -1 ) && ( pval.cutoff == -1 ))
+use.independent.filtering <- TRUE
 
 res <- results(dds, independentFiltering = use.independent.filtering)
 
