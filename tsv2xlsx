@@ -78,6 +78,7 @@ sub process_file {
 
   my @data;
   open (my $fh,"<",$infile) || die "Cannot open: $infile";
+  binmode($fh, ":utf8");
   while (<$fh>) {
     s/[\r\n]+$//;
     push @data, [ split("\t") ];
