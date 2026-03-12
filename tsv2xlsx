@@ -25,18 +25,24 @@ my $default_width = 10;
 
 our $opt_H;
 our $opt_a = FALSE;
+our $opt_c;
 our $opt_h;
 our $opt_o = "output.xlsx";
+our $opt_t;
 our $opt_w = 0;
 
-my $stat = getopts('Haho:w:');
+my $stat = getopts('Hacho:tw:');
 if (!$stat || $opt_h) {
-  print "Usage: $0 [options] [sheet_title:file1.tsv file2.tsv ...]\n";
+  print "Usage: $0 [options] [sheet_title:file1.tsv file2.csv ...]\n";
+
   print "-H - first line is _not_ header\n";
   print "-a - autofit column widths\n";
+  print "-c - input is always CSV\n";
   print "-h - print this message and exit.\n";
   print "-o FILENAME - output file name [$opt_o]\n";
+  print "-t - input is always TSV\n";
   print "-w NUM - maximum column width\n";
+
   print "if -a and -w NUM are both specified, the min of each width is used.\n";
   exit($stat);
 }
@@ -63,8 +69,12 @@ foreach my $raw_infile ( @ARGV ) {
   if ( $raw_infile =~ /^(.*):(.*)/ ) {
     ($title,$infile) = ($1,$2);
   } else {
-    $title = basename($raw_infile,".tsv");
+    $title = basename($raw_infile,".tsv",".csv");
     $infile = $raw_infile;
+  }
+  if ($infile eq "-") {
+    # Hail Mary!
+    $infile = "/dev/stdin";
   }
   process_file($infile,$title,$workbook);
 }
@@ -77,13 +87,34 @@ sub process_file {
   # my @data = $parser->read_file($infile);
 
   my @data;
-  open (my $fh,"<",$infile) || die "Cannot open: $infile";
-  binmode($fh, ":utf8");
-  while (<$fh>) {
-    s/[\r\n]+$//;
-    push @data, [ split("\t") ];
+  if ( $opt_t || $infile =~ /\.tsv$/ ) {
+    open (my $fh,"<",$infile) || die "Cannot open: $infile";
+    binmode($fh, ":utf8");
+    while (<$fh>) {
+      s/[\r\n]+$//;
+      push @data, [ split("\t") ];
+    }
+    close($fh) || die;
+  } elsif ( $opt_c || $infile =~ /\.csv$/ ) {
+    use Text::CSV;
+    my $csv = Text::CSV->new({ binary => 1 });
+    open (my $fh,"<",$infile) || die "Cannot open: $infile";
+    binmode($fh, ":utf8");
+    while (<$fh>) {
+      chomp;
+      $_ =~ s/\r$//;
+      my $status = $csv->parse($_);
+      if (!$status) {
+	$csv->error_diag();
+	print $csv->error_input(),"\n";
+	die;
+      }
+      push @data, [ $csv->fields() ];
+    }
+    close($fh) || die;
+  } else {
+    die "don't know how to process <<$infile>>,";
   }
-  close($fh) || die;
 
   my $headers;
   if ($opt_H) {
@@ -163,6 +194,7 @@ sub max {
 sub set_columns_width {
   my ($worksheet,$autofit_p,$max_width) = @_;
 
+  if (!defined($worksheet->{__col_widths})) { return; }
   my @autofit_widths = @{$worksheet->{__col_widths}};
 
   for (my $col=0; $col<scalar(@autofit_widths); $col++) {
