@@ -95,6 +95,9 @@ while (<STDIN>) {
     $name = $organismName;
   }
   if (defined($strain) && $name !~ / $strain$/) {
+    if ($opt_a) {
+      $strain =~ s/[^A-Za-z0-9]//g;
+    }
     $name .= " ".$strain;
   }
   if (defined($isolate) &&  $name !~ / $isolate$/) {
@@ -110,9 +113,6 @@ while (<STDIN>) {
 
   if ($opt_u) {
     $filename = uc($filename);
-  }
-  if ($opt_a) {
-    $filename =~ s/[^A-Z0-9]//g;
   }
 
   $filename_of->{$accession} = $filename;
