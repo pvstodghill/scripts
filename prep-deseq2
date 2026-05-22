@@ -22,7 +22,7 @@ our $opt_x;
 sub usage {
   print STDERR "Usage: $0 [options] CONDITION:SAMPLE ... \n";
 
-  print STDERR "-F PARAM - fitType [$opt_F]";
+  print STDERR "-F PARAM - fitType [$opt_F]\n";
   print STDERR "-c COUNTS.txt - File containing counts [counts.txt]\n";
   print STDERR "-d DIR - Directory to contain output\n";
   print STDERR "-f Q-CUTOFF - FDR cutoff (-1 == no cutoff) [0.05]\n";

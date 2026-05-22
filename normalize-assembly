@@ -40,17 +40,19 @@ if [ "$opt_h" ] ; then
     usage
 fi
 
-INPUT_FNA=$1 ; shift 1
-PREFIX=$1 ; shift 1
-if [ -z "$INPUT_FNA" ] ; then
+if [ -z "$1" ] ; then
     usage 1
+fi
+INPUT_FNA=$1 ; shift 1
+if [ "$1" ] ; then
+    PREFIX=$1 ; shift 1
 fi
 
 WORKDIR="$opt_d"
 FIRST_FAA="$opt_f"
 
 if [ -e "$WORKDIR" ] ; then
-    echo 1>&2 "Work dir exists: $WORK_DIR"
+    echo 1>&2 "Work dir exists: $WORKDIR"
     exit 1
 fi
 

@@ -92,11 +92,11 @@ sub process_entry {
   my $assembly_level = $assembly_info->{assemblyLevel} || $assembly_info->{assembly_level};
   my $assembly_status = $assembly_info->{assemblyStatus} || $assembly_info->{assembly_status};
   my $release_date = $assembly_info->{releaseDate} || $assembly_info->{release_date};
-  my $representative = "";
+  my $category = "";
   if (defined($assembly_info->{refseqCategory})) {
-    $representative = $assembly_info->{refseqCategory};
+    $category = $assembly_info->{refseqCategory};
   } elsif (defined($assembly_info->{refseq_category})) {
-    $representative = $assembly_info->{refseq_category};
+    $category = $assembly_info->{refseq_category};
   }
 
 
@@ -114,7 +114,7 @@ sub process_entry {
   }
 
   print join("\t",$accession,$source,$organismName,$strain,$assembly_level,$assembly_status,$release_date,
-	    $representative,$type_info),"\n";
+	    $category,$type_info),"\n";
 
 }
 
