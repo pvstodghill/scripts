@@ -23,6 +23,7 @@ use File::Basename;
 
 my $default_width = 10;
 
+our $opt_A = FALSE;
 our $opt_H;
 our $opt_a = FALSE;
 our $opt_c;
@@ -31,10 +32,11 @@ our $opt_o = "output.xlsx";
 our $opt_t;
 our $opt_w = 0;
 
-my $stat = getopts('Hacho:tw:');
-if (!$stat || $opt_h) {
+sub usage {
+  
   print "Usage: $0 [options] [sheet_title:file1.tsv file2.csv ...]\n";
 
+  print "-A - add autofilter to all headers\n";
   print "-H - first line is _not_ header\n";
   print "-a - autofit column widths\n";
   print "-c - input is always CSV\n";
@@ -43,14 +45,27 @@ if (!$stat || $opt_h) {
   print "-t - input is always TSV\n";
   print "-w NUM - maximum column width\n";
 
+  print "\n";
   print "if -a and -w NUM are both specified, the min of each width is used.\n";
-  exit($stat);
+  print "-A and -H are mutually exclusive.\n";
+
+  exit($_);
+}
+
+my $stat = getopts('AHacho:tw:');
+if (!$stat || $opt_h) {
+  usage($stat);
 }
 
 if ( scalar(@ARGV) == 0 ) {
   # Hail Mary!
   push @ARGV, "/dev/stdin";
 }
+
+if ($opt_A && $opt_H) {
+  usage(1);
+}
+  
 
 #(!$opt_H) || die "-H not implemented,";
 
@@ -134,32 +149,26 @@ sub process_file {
 
 # Add a worksheet
 sub import_data {
-	my $workbook  = shift;
-	my $base_name = shift;
-	my $colums    = shift;
-	my $data      = shift;
-	my $limit     = shift || DEFAULT_LIMIT;
-	my $start_row = shift || DEFAULT_START_ROW;
-	my $worksheet = $workbook->add_worksheet($base_name);
-	$worksheet->add_write_handler(qr[\w], \&store_string_widths);
-	my $w = 1;
-	$worksheet->write('A' . $start_row, $colums, ,$header_fmt);
-	my $i = $start_row;
-	my $qty = 0;
-	for my $row (@$data) {
-	    $qty++;
-	    if ($limit > -1 && $i > $limit) {
-			 $i = $start_row;
-			 $w++;
-			 $worksheet = $workbook->add_worksheet("$base_name - $w");
-			 $worksheet->write('A1', $colums,$header_fmt);
-		}
-		$worksheet->write($i++, 0, $row);
-	}
-	set_columns_width($worksheet,$opt_a,$opt_w);
+  my $workbook  = shift;
+  my $title = shift;
+  my $headers    = shift;
+  my $data      = shift;
+  my $worksheet = $workbook->add_worksheet($title);
+  $worksheet->add_write_handler(qr[\w], \&store_string_widths);
+  $worksheet->write('A1', $headers, ,$header_fmt);
+  my $num_rows = 1;
+  for my $row (@$data) {
+    $worksheet->write($num_rows++, 0, $row);
+  }
+  set_columns_width($worksheet,$opt_a,$opt_w);
 
-	#warn "Convereted $qty rows.";
-	return $worksheet;
+  if ( $opt_A ) {
+    my $num_cols = scalar($headers->@*);
+    $worksheet->autofilter(0,0,$num_rows-1,$num_cols-1);
+    $worksheet->freeze_panes(1,0); # freeze first row
+  }
+
+  return $worksheet;
 }
 
 
@@ -194,7 +203,9 @@ sub max {
 sub set_columns_width {
   my ($worksheet,$autofit_p,$max_width) = @_;
 
-  if (!defined($worksheet->{__col_widths})) { return; }
+  if (!defined($worksheet->{__col_widths})) {
+    return;
+  }
   my @autofit_widths = @{$worksheet->{__col_widths}};
 
   for (my $col=0; $col<scalar(@autofit_widths); $col++) {
@@ -226,43 +237,43 @@ sub set_columns_width {
 #
 sub store_string_widths {
 
-    my $worksheet = shift;
-    my $col       = $_[1];
-    my $token     = $_[2];
+  my $worksheet = shift;
+  my $col       = $_[1];
+  my $token     = $_[2];
 
-    # Ignore some tokens that we aren't interested in.
-    return if not defined $token;       # Ignore undefs.
-    return if $token eq '';             # Ignore blank cells.
-    return if ref $token eq 'ARRAY';    # Ignore array refs.
-    return if $token =~ /^=/;           # Ignore formula
+  # Ignore some tokens that we aren't interested in.
+  return if not defined $token;	     # Ignore undefs.
+  return if $token eq '';	     # Ignore blank cells.
+  return if ref $token eq 'ARRAY';   # Ignore array refs.
+  return if $token =~ /^=/;	     # Ignore formula
 
-    # Ignore numbers
-    #return if $token =~ /^([+-]?)(?=\d|\.\d)\d*(\.\d*)?([Ee]([+-]?\d+))?$/;
+  # Ignore numbers
+  #return if $token =~ /^([+-]?)(?=\d|\.\d)\d*(\.\d*)?([Ee]([+-]?\d+))?$/;
 
-    # Ignore various internal and external hyperlinks. In a real scenario
-    # you may wish to track the length of the optional strings used with
-    # urls.
-    return if $token =~ m{^[fh]tt?ps?://};
-    return if $token =~ m{^mailto:};
-    return if $token =~ m{^(?:in|ex)ternal:};
-
-
-    # We store the string width as data in the Worksheet object. We use
-    # a double underscore key name to avoid conflicts with future names.
-    #
-    my $old_width    = $worksheet->{__col_widths}->[$col];
-    my $string_width = string_width($token);
-
-    if (not defined $old_width or $string_width > $old_width) {
-        # You may wish to set a minimum column width as follows.
-        #return undef if $string_width < 10;
-
-        $worksheet->{__col_widths}->[$col] = $string_width;
-    }
+  # Ignore various internal and external hyperlinks. In a real scenario
+  # you may wish to track the length of the optional strings used with
+  # urls.
+  return if $token =~ m{^[fh]tt?ps?://};
+  return if $token =~ m{^mailto:};
+  return if $token =~ m{^(?:in|ex)ternal:};
 
 
-    # Return control to write();
-    return undef;
+  # We store the string width as data in the Worksheet object. We use
+  # a double underscore key name to avoid conflicts with future names.
+  #
+  my $old_width    = $worksheet->{__col_widths}->[$col];
+  my $string_width = string_width($token);
+
+  if (not defined $old_width or $string_width > $old_width) {
+    # You may wish to set a minimum column width as follows.
+    #return undef if $string_width < 10;
+
+    $worksheet->{__col_widths}->[$col] = $string_width;
+  }
+
+
+  # Return control to write();
+  return undef;
 }
 
 
@@ -273,5 +284,5 @@ sub store_string_widths {
 #
 sub string_width {
 
-    return length $_[0];
+  return length $_[0];
 }
